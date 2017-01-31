@@ -184,6 +184,30 @@ def train_model(x_train, y_train, x_val, y_val):
     return model
 
 
+def predict_image(model, image_id):
+    x = normalize(np.load('cache/images/%s.npy' % image_id))
+    xb = np.zeros((n_patches * n_patches, x.shape[0], image_patch_size, image_patch_size), dtype=np.float32)
+
+    k = 0
+    for i in xrange(n_patches):
+        for j in xrange(n_patches):
+            xb[k] = x[np.newaxis, :, i*image_patch_size:(i+1)*image_patch_size, j*image_patch_size:(j+1)*image_patch_size]
+            k += 1
+
+    pb = model.predict(xb)
+    p = np.zeros((n_classes, mask_size, mask_size), dtype=np.float32)
+
+    k = 0
+    for i in xrange(n_patches):
+        for j in xrange(n_patches):
+            p[:, i*mask_patch_size:(i+1)*mask_patch_size, j*mask_patch_size:(j+1)*mask_patch_size] = pb[k]
+            k += 1
+
+    np.save('cache/preds/%s.npy' % image_id, p)
+
+    return p
+
+
 # Validation pass
 if True:
     train_x, train_y = load_labelled_patches(val_train_image_ids)
