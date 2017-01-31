@@ -23,6 +23,15 @@ mask_patch_size = mask_size / n_patches
 smooth = 1e-12
 
 
+def normalize(x):
+    for c in xrange(x.shape[0]):
+        q5, q95 = np.percentile(x[c], [5, 95])
+
+        x[c] = np.clip((x[c] - q5) / (q95 - q5), 0, 1)
+
+    return x
+
+
 def load_train_patches():
     print "Loading train patches..."
 
@@ -33,7 +42,7 @@ def load_train_patches():
 
     k = 0
     for image_id in train_image_ids:
-        x = np.load('cache/images/%s.npy' % image_id)
+        x = normalize(np.load('cache/images/%s.npy' % image_id))
         y = np.load('cache/masks/%s.npy' % image_id)
 
         for i in xrange(n_patches):
@@ -168,12 +177,6 @@ def train_model(x_train, y_train, x_val, y_val):
     model_checkpoint = ModelCheckpoint('cache/unet_tmp.hdf5', monitor='loss', save_best_only=True)
 
     print "Training model..."
-
-    means = x_train.mean(axis=(0, 2, 3))[np.newaxis, :, np.newaxis, np.newaxis]
-    stds = x_train.std(axis=(0, 2, 3))[np.newaxis, :, np.newaxis, np.newaxis]
-
-    x_train = (x_train - means) / stds
-    x_val = (x_val - means) / stds
 
     model.fit_generator(
         train_batch_generator(x_train, y_train, batch_size=64),
