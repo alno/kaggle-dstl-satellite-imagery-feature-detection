@@ -18,7 +18,7 @@ for image_id, image_cls_wkt in train_wkt.groupby('image_id'):
 
     mask = np.zeros((n_classes, mask_size, mask_size), dtype=np.uint8)
 
-    for tp in train_wkt.itertuples():
+    for tp in image_cls_wkt.itertuples():
         poly = wkt.loads(tp.multi_poly_wkt)
         contours = convert_geo_poly_to_raster_contours(poly, (mask_size, mask_size), [xmax, ymin])
         mask[tp.cls-1] = plot_contours((mask_size, mask_size), contours, 1)
