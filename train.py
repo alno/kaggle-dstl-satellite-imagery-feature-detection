@@ -44,6 +44,36 @@ def load_train_patches():
     return xx, yy
 
 
+def train_batch_generator(x, y, batch_size=64):
+    index = np.arange(x.shape[0])
+
+    while True:
+        np.random.shuffle(index)
+
+        batch_start = 0
+        while batch_start < x.shape[0]:
+            batch_index = index[batch_start:batch_start + batch_size]
+            batch_start += batch_size
+
+            x_batch = x[batch_index].copy()
+            y_batch = y[batch_index].copy()
+
+            for i in xrange(x_batch.shape[0]):
+                if np.random.random() < 0.5:  # Mirror by x
+                    x_batch[i] = x_batch[i, :, ::-1, :]
+                    y_batch[i] = y_batch[i, :, ::-1, :]
+
+                if np.random.random() < 0.5:  # Mirror by y
+                    x_batch[i] = x_batch[i, :, :, ::-1]
+                    y_batch[i] = y_batch[i, :, :, ::-1]
+
+                if np.random.random() < 0.5:  # Rotate
+                    x_batch[i] = np.swapaxes(x_batch[i], 1, 2)
+                    y_batch[i] = np.swapaxes(y_batch[i], 1, 2)
+
+            yield x_batch, y_batch
+
+
 def jaccard_coef(y_true, y_pred):
     # __author__ = Vladimir Iglovikov
     intersection = K.sum(y_true * y_pred, axis=[0, -1, -2])
@@ -126,9 +156,10 @@ def train_model(x_train, y_train, x_val, y_val):
     x_train = (x_train - means) / stds
     x_val = (x_val - means) / stds
 
-    model.fit(
-        x_train, y_train,
-        batch_size=64, nb_epoch=50, verbose=1, shuffle=True,
+    model.fit_generator(
+        train_batch_generator(x_train, y_train, batch_size=64),
+        samples_per_epoch=x_train.shape[0],
+        nb_epoch=50, verbose=1,
         callbacks=[model_checkpoint], validation_data=(x_val, y_val))
 
     return model
