@@ -9,10 +9,7 @@ from keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from keras.layers.advanced_activations import ELU
 from keras import backend as K
 
-from util.meta import train_image_ids, image_size, mask_size, n_classes
-
-from sklearn.utils import shuffle
-from sklearn.model_selection import train_test_split
+from util.meta import image_size, mask_size, n_classes, val_train_image_ids, val_test_image_ids
 
 
 n_patches = 16
@@ -32,16 +29,16 @@ def normalize(x):
     return x
 
 
-def load_train_patches():
+def load_labelled_patches(image_ids):
     print "Loading train patches..."
 
-    n = len(train_image_ids) * n_patches * n_patches
+    n = len(image_ids) * n_patches * n_patches
 
     xx = np.zeros((n, 3, image_patch_size, image_patch_size), dtype=np.float32)
     yy = np.zeros((n, n_classes, mask_patch_size, mask_patch_size), dtype=np.uint8)
 
     k = 0
-    for image_id in train_image_ids:
+    for image_id in image_ids:
         x = normalize(np.load('cache/images/%s.npy' % image_id))
         y = np.load('cache/masks/%s.npy' % image_id)
 
@@ -187,9 +184,9 @@ def train_model(x_train, y_train, x_val, y_val):
     return model
 
 
-train_x, train_y = load_train_patches()
-train_x, train_y = shuffle(train_x, train_y, random_state=2017)
+# Validation pass
+if True:
+    train_x, train_y = load_labelled_patches(val_train_image_ids)
+    val_x, val_y = load_labelled_patches(val_test_image_ids)
 
-train_x, val_x, train_y, val_y = train_test_split(train_x, train_y, test_size=0.3, random_state=2017)
-
-train_model(train_x, train_y, val_x, val_y)
+    train_model(train_x, train_y, val_x, val_y)
