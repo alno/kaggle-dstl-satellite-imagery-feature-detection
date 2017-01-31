@@ -64,6 +64,10 @@ def jaccard_coef_int(y_true, y_pred):
     return K.mean(jac)
 
 
+def combined_loss(y_true, y_pred):
+    return K.binary_crossentropy(y_pred, y_true) + 0.2 * (1 - jaccard_coef(y_true, y_pred))
+
+
 def get_unet():
     inputs = Input((3, image_patch_size, image_patch_size))
     conv1 = Convolution2D(32, 3, 3, activation='relu', border_mode='same')(inputs)
@@ -104,7 +108,7 @@ def get_unet():
     conv10 = Convolution2D(n_classes, 1, 1, activation='sigmoid')(conv9)
 
     model = Model(input=inputs, output=conv10)
-    model.compile(optimizer=Adam(), loss='binary_crossentropy', metrics=[jaccard_coef, jaccard_coef_int, 'accuracy'])
+    model.compile(optimizer=Adam(), loss=combined_loss, metrics=[jaccard_coef, jaccard_coef_int, 'accuracy'])
     return model
 
 
