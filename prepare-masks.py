@@ -1,6 +1,6 @@
 from util.meta import mask_size, n_classes
 from util.data import train_wkt, grid_sizes
-from util.masks import convert_geo_poly_to_raster_contours, plot_contours
+from util.masks import poly_to_mask
 
 import numpy as np
 
@@ -20,8 +20,7 @@ for image_id, image_cls_wkt in train_wkt.groupby('image_id'):
 
     for tp in image_cls_wkt.itertuples():
         poly = wkt.loads(tp.multi_poly_wkt)
-        contours = convert_geo_poly_to_raster_contours(poly, (mask_size, mask_size), [xmax, ymin])
-        mask[tp.cls-1] = plot_contours((mask_size, mask_size), contours, 1)
+        mask[tp.cls-1] = poly_to_mask(poly, (mask_size, mask_size), [xmax, ymin])
 
     np.save('cache/masks/%s.npy' % image_id, mask)
 

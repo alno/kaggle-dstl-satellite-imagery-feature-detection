@@ -1,6 +1,7 @@
 import numpy as np
 
 import os
+import time
 
 from keras.models import Model
 from keras.layers import Input, merge, Convolution2D, MaxPooling2D, UpSampling2D, Activation
@@ -9,7 +10,8 @@ from keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from keras.layers.advanced_activations import ELU
 from keras import backend as K
 
-from util.meta import image_size, mask_size, n_classes, val_train_image_ids, val_test_image_ids
+from util.meta import image_size, mask_size, n_classes, val_train_image_ids, val_test_image_ids, full_train_image_ids
+from util.data import sample_submission
 
 
 n_patches = 16
@@ -167,7 +169,7 @@ def get_unet():
     return model
 
 
-def train_model(x_train, y_train, x_val, y_val):
+def train_model(x_train, y_train, x_val=None, y_val=None):
     print "Defining model..."
 
     model = get_unet()
@@ -175,35 +177,57 @@ def train_model(x_train, y_train, x_val, y_val):
 
     print "Training model..."
 
+    #model.load_weights('cache/unet_tmp.hdf5')
+
     model.fit_generator(
         train_batch_generator(x_train, y_train, batch_size=64),
         samples_per_epoch=x_train.shape[0],
-        nb_epoch=50, verbose=1,
-        callbacks=[model_checkpoint], validation_data=(x_val, y_val))
+        nb_epoch=70, verbose=1,
+        callbacks=[model_checkpoint], validation_data=None if x_val is None else (x_val, y_val))
 
     return model
 
 
 def predict_image(model, image_id):
+    start_time = time.time()
+
+    n_steps = n_patches * 2 - 1
+    image_step_size = image_patch_size // 2
+    mask_step_size = mask_patch_size // 2
+
     x = normalize(np.load('cache/images/%s.npy' % image_id))
-    xb = np.zeros((n_patches * n_patches, x.shape[0], image_patch_size, image_patch_size), dtype=np.float32)
+    xb = np.zeros((n_steps * n_steps, x.shape[0], image_patch_size, image_patch_size), dtype=np.float32)
 
     k = 0
-    for i in xrange(n_patches):
-        for j in xrange(n_patches):
-            xb[k] = x[np.newaxis, :, i*image_patch_size:(i+1)*image_patch_size, j*image_patch_size:(j+1)*image_patch_size]
+    for i in xrange(n_steps):
+        for j in xrange(n_steps):
+            si = i*image_step_size
+            sj = j*image_step_size
+
+            xb[k] = x[np.newaxis, :, si:si+image_patch_size, sj:sj+image_patch_size]
+
             k += 1
 
     pb = model.predict(xb)
+
     p = np.zeros((n_classes, mask_size, mask_size), dtype=np.float32)
+    c = np.zeros((n_classes, mask_size, mask_size), dtype=np.float32)
 
     k = 0
-    for i in xrange(n_patches):
-        for j in xrange(n_patches):
-            p[:, i*mask_patch_size:(i+1)*mask_patch_size, j*mask_patch_size:(j+1)*mask_patch_size] = pb[k]
+    for i in xrange(n_steps):
+        for j in xrange(n_steps):
+            si = i*mask_step_size
+            sj = j*mask_step_size
+
+            p[:, si:si+mask_patch_size, sj:sj+mask_patch_size] += pb[k]
+            c[:, si:si+mask_patch_size, sj:sj+mask_patch_size] += 1
             k += 1
 
+    p = p / c
+
     np.save('cache/preds/%s.npy' % image_id, p)
+
+    print "Image %s predicted in %d seconds, %d, %.3f" % (image_id, time.time() - start_time, c.min(), c.mean())
 
     return p
 
@@ -213,4 +237,17 @@ if True:
     train_x, train_y = load_labelled_patches(val_train_image_ids)
     val_x, val_y = load_labelled_patches(val_test_image_ids)
 
-    train_model(train_x, train_y, val_x, val_y)
+    model = train_model(train_x, train_y, val_x, val_y)
+
+    for image_id in val_test_image_ids:
+        predict_image(model, image_id)
+
+# Full pass
+
+model = train_model(*load_labelled_patches(full_train_image_ids))
+
+for image_id in sample_submission['ImageId'].unique():
+    pred = predict_image(model, image_id)
+
+
+print "Done."
