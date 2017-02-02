@@ -26,8 +26,8 @@ def combined_loss(y_true, y_pred):
     return K.binary_crossentropy(y_pred, y_true) + 0.2 * (1 - jaccard_coef(y_true, y_pred))
 
 
-def unet(input_shape, n_classes):
-    inputs = Input(input_shape)
+def unet(input_shapes, n_classes):
+    inputs = Input(input_shapes['in'], name='in')
     conv1 = Convolution2D(32, 3, 3, activation='relu', border_mode='same')(inputs)
     conv1 = Convolution2D(32, 3, 3, activation='relu', border_mode='same')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -63,7 +63,7 @@ def unet(input_shape, n_classes):
     return model
 
 
-def unet2(input_shape, n_classes):
+def unet2(input_shapes, n_classes):
     def activation():
         return Activation('relu')
 
@@ -95,7 +95,7 @@ def unet2(input_shape, n_classes):
     def merge_block(conv, skip):
         return merge([UpSampling2D(size=(2, 2))(conv), skip], mode='concat', concat_axis=1)
 
-    inputs = Input(input_shape)
+    inputs = Input(input_shapes['in'], name='in')
 
     conv1 = conv_block(inputs, 48, factorize=False)
     pool1 = pool_block(conv1, 2)

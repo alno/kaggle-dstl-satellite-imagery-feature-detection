@@ -13,65 +13,7 @@ from util.data import grid_sizes, sample_submission
 from util.masks import mask_to_poly
 
 from model import ModelPipeline
-from model.archs import unet, unet2
-
-presets = {
-    'u1d3': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 3,
-    },
-
-    'u1d2': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 2,
-    },
-
-    'u2d3': {
-        'arch': unet2,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 3,
-    },
-
-    'u1d3b': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 3,
-        'classes': [0, 4, 5, 6]
-    },
-
-    'u1d3s': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 1,
-        'classes': [7, 8, 9],
-        'batch_mode': 'random',
-    },
-
-    'u1d3br': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 3,
-        'classes': [0, 4, 5, 6],
-        'batch_mode': 'random',
-    },
-
-    'u1d4br': {
-        'arch': unet,
-        'n_epoch': 100,
-        'patch_size': 64,
-        'downscale': 4,
-        'classes': [4, 5, 6],
-        'batch_mode': 'random',
-    },
-}
+from model.presets import presets
 
 parser = argparse.ArgumentParser(description='Train model')
 parser.add_argument('preset', type=str, help='model preset (features and hyperparams)')
@@ -101,8 +43,15 @@ if not args.no_val:
         pipeline.fit(val_train_image_ids, val_test_image_ids)
 
     for image_id in val_test_image_ids:
+        sys.stdout.write("  Processing %s... " % (image_id))
+        sys.stdout.flush()
+
+        start_time = time.time()
+
         p = pipeline.predict(image_id)
-        np.save('cache/preds/%s.npy' % image_id, p)
+        np.save('cache/preds/%s-%s.npy' % (image_id, preset_name), p)
+
+        print "Done in %d seconds" % (time.time() - start_time)
 
 
 # Full pass
