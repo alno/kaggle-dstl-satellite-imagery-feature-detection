@@ -7,7 +7,7 @@ import cv2
 
 
 def normalize(x):
-    x = x.astype(np.float16)
+    x = x.astype(np.float32)
 
     for c in xrange(x.shape[0]):
         qb, qt = np.percentile(x[c], [5, 95])
