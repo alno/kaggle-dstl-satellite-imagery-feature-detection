@@ -51,7 +51,7 @@ class Input(object):
 
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, n_epoch, mask_patch_size, mask_downscale, inputs, classes=range(n_classes), batch_mode='grid'):
+    def __init__(self, name, arch, n_epoch, mask_patch_size, mask_downscale, inputs, classes=range(n_classes), batch_mode='grid', batch_size=64):
         self.name = name
         self.arch = arch
         self.n_epoch = n_epoch
@@ -67,7 +67,7 @@ class ModelPipeline(object):
         self.n_classes = len(classes)
 
         self.batch_mode = batch_mode
-        self.batch_size = 64
+        self.batch_size = batch_size
 
         self.random_batch_per_epoch = 100
 
