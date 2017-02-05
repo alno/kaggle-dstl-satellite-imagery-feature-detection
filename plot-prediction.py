@@ -26,4 +26,19 @@ def plot_prediction(image_id, cls=0):
     plt.show()
 
 
-plot_prediction('6100_2_2')
+def plot_all_class_predictions(image_id, pred_id):
+    image = np.load('cache/images/%s_I.npy' % image_id)
+    pred = np.load('cache/preds/%s.npy' % image_id)
+
+    f, ax = plt.subplots(2, 5, sharex='col', sharey='row')
+
+    ax[0][0].imshow(np.rollaxis(image.astype(np.float32) / image.max(axis=(1, 2))[:, np.newaxis, np.newaxis], 0, 3))
+
+    for c in xrange(9):
+        ax[(c+1) // 5][(c+1) % 5].imshow(pred[c], cmap='hot')
+
+    plt.tight_layout()
+    plt.show()
+
+
+plot_all_class_predictions('6100_2_2', '6100_2_2_umi-val')
