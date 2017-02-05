@@ -12,4 +12,6 @@ full_train_image_ids = ['6040_2_2', '6120_2_2', '6120_2_0', '6090_2_0', '6040_1_
 val_test_image_ids = ['6140_3_1', '6110_1_2', '6160_2_1', '6170_0_4', '6100_2_2']
 val_train_image_ids = list(set(full_train_image_ids) - set(val_test_image_ids))
 
+class_names = ['buildings', 'structs', 'roads', 'tracks', 'trees', 'crops', 'rivers', 'water', 'trucks', 'cars']
+
 image_border = 0
