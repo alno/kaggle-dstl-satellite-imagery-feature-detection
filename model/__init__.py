@@ -4,14 +4,14 @@ import cv2
 from math import ceil
 
 from util.meta import n_classes
-from util import load_pickle
+from util import load_pickle, save_pickle
 
 
 from keras.callbacks import ModelCheckpoint, Callback
 
 
 patch_offset_range = 0.5  # Half of patch size
-channel_shift_range = 0.05
+channel_shift_range = 0.001
 
 
 debug = False
@@ -37,7 +37,7 @@ class Monitor(Callback):
     def on_epoch_end(self, epoch, logs={}):
         for image_id in self.image_ids:
             p = self.pipeline.predict(image_id)
-            np.save('cache/preds/%s.npy' % image_id, p)
+            np.save('cache/preds/%s_%s.npy' % (image_id, self.pipeline.name), p)
 
 
 class Input(object):
@@ -49,9 +49,30 @@ class Input(object):
         self.n_channels = band_n_channels[band]
 
 
+class Normalizer(object):
+
+    def fit(self, images):
+        self.mins = np.empty(images[0].shape[0])
+        self.maxs = np.empty(images[0].shape[0])
+
+        for c in xrange(images[0].shape[0]):
+            self.mins[c] = min(img[c].min() for img in images)
+            self.maxs[c] = max(img[c].max() for img in images)
+
+        return self
+
+    def transform(self, img):
+        res = np.empty(img.shape, dtype=np.float32)
+
+        for c in xrange(img.shape[0]):
+            res[c] = (img[c] - self.mins[c]) / (self.maxs[c] - self.mins[c]) - 0.3
+
+        return res
+
+
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, n_epoch, mask_patch_size, mask_downscale, inputs, classes=range(n_classes), batch_mode='grid', batch_size=64):
+    def __init__(self, name, arch, n_epoch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), batch_mode='grid', batch_size=64, epoch_batches=100):
         self.name = name
         self.arch = arch
         self.n_epoch = n_epoch
@@ -69,7 +90,7 @@ class ModelPipeline(object):
         self.batch_mode = batch_mode
         self.batch_size = batch_size
 
-        self.random_batch_per_epoch = 100
+        self.epoch_batches = epoch_batches
 
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
@@ -77,25 +98,45 @@ class ModelPipeline(object):
         self.model = self.arch(input_shapes=input_shapes, n_classes=self.n_classes)
 
     def load(self):
+        self.input_normalizers = load_pickle('cache/models/%s-norm.pickle' % self.name)
         self.model.load_weights('cache/models/%s.hdf5' % self.name)
 
-    def fit(self, train_image_ids, val_image_ids):
+    def fit(self, train_image_ids, val_image_ids=None):
+        print "Fitting normalizers..."
+
+        train_input_images = self.load_input_images(train_image_ids)
+
+        self.fit_and_apply_normalizers(train_input_images)
+
         print "Training model with %d params..." % self.model.count_params()
 
         if self.batch_mode == 'grid':
-            generator = self.grid_batch_generator(train_image_ids)
+            generator = self.grid_batch_generator(train_image_ids, train_input_images)
             n_samples = len(train_image_ids) * self.n_patches * self.n_patches
         elif self.batch_mode == 'random':
-            generator = self.random_batch_generator(train_image_ids)
-            n_samples = self.random_batch_per_epoch * self.batch_size
+            generator = self.random_batch_generator(train_image_ids, train_input_images)
+            n_samples = self.epoch_batches * self.batch_size
 
-        callbacks = [ModelCheckpoint('cache/models/%s.hdf5' % self.name, monitor='loss', save_best_only=True), Monitor(self, ['6100_2_2'])]
+        callbacks = [ModelCheckpoint('cache/models/%s.hdf5' % self.name, monitor='loss', save_best_only=True)]
+
+        if val_image_ids is not None:
+            callbacks.append(Monitor(self, ['6100_2_2']))
 
         self.model.fit_generator(
             generator,
             samples_per_epoch=n_samples,
             nb_epoch=self.n_epoch, verbose=1,
             callbacks=callbacks, validation_data=None if val_image_ids is None else self.load_labelled_patches(val_image_ids))
+
+    def fit_and_apply_normalizers(self, input_images):
+        self.input_normalizers = {}
+        for input_name, images in input_images.items():
+            self.input_normalizers[input_name] = Normalizer().fit(images)
+
+            for i in xrange(len(images)):
+                images[i] = self.input_normalizers[input_name].transform(images[i])
+
+        save_pickle('cache/models/%s-norm.pickle' % self.name, self.input_normalizers)
 
     def predict(self, image_id):
         meta = load_pickle('cache/meta/%s.pickle' % image_id)
@@ -104,8 +145,8 @@ class ModelPipeline(object):
         for input_name in self.inputs:
             inp = self.inputs[input_name]
 
-            x = np.load('cache/images/%s_%s.npy' % (image_id, inp.band))
-            xb = np.zeros((self.n_patches * self.n_patches, x.shape[0], inp.patch_size, inp.patch_size), dtype=np.float16)
+            x = self.input_normalizers[input_name].transform(np.load('cache/images/%s_%s.npy' % (image_id, inp.band)))
+            xb = np.zeros((self.n_patches * self.n_patches, x.shape[0], inp.patch_size, inp.patch_size), dtype=np.float32)
 
             k = 0
             for i in xrange(self.n_patches):
@@ -170,7 +211,7 @@ class ModelPipeline(object):
             y = np.load('cache/masks/%s.npy' % image_id)[self.classes]
             x = {}
             for input_name, inp in self.inputs.items():
-                x[input_name] = np.load('cache/images/%s_%s.npy' % (image_id, inp.band))
+                x[input_name] = self.input_normalizers[input_name].transform(np.load('cache/images/%s_%s.npy' % (image_id, inp.band)))
 
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
@@ -205,11 +246,21 @@ class ModelPipeline(object):
                 for c in xrange(x_batch.shape[1]):
                     x_batch[i, c] += np.random.uniform(-channel_shift_range, channel_shift_range)
 
-    def grid_batch_generator(self, image_ids):
-        masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
+    def write_batch_images(self, x_batches, y_batch, patches, image_ids):
+        for i, (img_idx, oi, oj) in enumerate(patches):
+            if np.random.random() < 0.01:
+                for input_name, inp in self.inputs.items():
+                    cv2.imwrite("debug/image_%s_%3f_%3f_%s.png" % (image_ids[img_idx], oi, oj, inp.band), np.rollaxis(np.clip(x_batches[input_name][i, :3], 0, 1) * 255.0, 0, 3).astype(np.uint8))
+                cv2.imwrite("debug/mask_%s_%3f_%3f.png" % (image_ids[img_idx], oi, oj), np.rollaxis(np.clip(y_batch[i, [0, 3, 4]], 0, 1) * 255.0, 0, 3).astype(np.uint8))
+
+    def load_input_images(self, image_ids):
         input_images = {}
         for input_name, inp in self.inputs.items():
             input_images[input_name] = [np.load('cache/images/%s_%s.npy' % (image_id, inp.band)) for image_id in image_ids]
+        return input_images
+
+    def grid_batch_generator(self, image_ids, input_images):
+        masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
 
         while True:
             # Prepare index of patch locations
@@ -247,23 +298,16 @@ class ModelPipeline(object):
 
                 # Write debug images
                 if debug:
-                    for i in xrange(len(batch_patches)):
-                        if np.random.random() < 0.01:
-                            for input_name, inp in self.inputs.items():
-                                cv2.imwrite("debug/image_%s_%3f_%3f_%s.png" % (image_ids[img_idx], oi, oj, inp.band), np.rollaxis(np.clip(x_batches[input_name][i], 0, 1) * 255.0, 0, 3).astype(np.uint8))
-                            cv2.imwrite("debug/mask_%s_%3f_%3f.png" % (image_ids[img_idx], oi, oj), np.rollaxis(np.clip(y_batch[i, [0, 3, 4]], 0, 1) * 255.0, 0, 3).astype(np.uint8))
+                    self.write_batch_images(x_batches, y_batch, patches, image_ids)
 
                 yield x_batches, y_batch
 
                 batch_start += self.batch_size
 
-    def random_batch_generator(self, image_ids):
+    def random_batch_generator(self, image_ids, input_images):
         threshold = 1
 
         masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
-        input_images = {}
-        for input_name, inp in self.inputs.items():
-            input_images[input_name] = [np.load('cache/images/%s_%s.npy' % (image_id, inp.band)) for image_id in image_ids]
 
         while True:
             x_batches = {}
@@ -274,6 +318,7 @@ class ModelPipeline(object):
 
             # Extract batch patches
             k = 0
+            patches = []
             while k < self.batch_size:
                 img_idx = np.random.randint(len(masks))
 
@@ -288,9 +333,14 @@ class ModelPipeline(object):
                 for input_name, inp in self.inputs.items():
                     self.extract_patch(x_batches[input_name], input_images[input_name][img_idx], k, oi, oj, inp.patch_size, inp.downscale)
 
+                patches.append((img_idx, oi, oj))
                 k += 1
 
             # Augment them
             self.augment_batch(x_batches, y_batch)
+
+            # Write debug images
+            if debug:
+                self.write_batch_images(x_batches, y_batch, patches, image_ids)
 
             yield x_batches, y_batch
