@@ -80,6 +80,7 @@ class ModelPipeline(object):
         self.n_epoch = n_epoch
 
         self.inputs = dict((key, Input(mask_patch_size * mask_downscale / band_size_factors[inp['band']] / inp.get('downscale', 1), **inp)) for key, inp in inputs.items())
+        self.coarse_input = max(self.inputs.keys(), key=lambda inp: band_size_factors[self.inputs[inp].band])
 
         self.mask_patch_size = mask_patch_size
         self.mask_downscale = mask_downscale
@@ -144,16 +145,19 @@ class ModelPipeline(object):
         meta = load_pickle('cache/meta/%s.pickle' % image_id)
         xbs = {}
 
-        for input_name in self.inputs:
-            inp = self.inputs[input_name]
+        x = {}
+        for input_name, inp in self.inputs.items():
+            x[input_name] = self.input_normalizers[input_name].transform(np.load('cache/images/%s_%s.npy' % (image_id, inp.band)))
 
-            x = self.input_normalizers[input_name].transform(np.load('cache/images/%s_%s.npy' % (image_id, inp.band)))
-            xb = np.zeros((self.n_patches * self.n_patches, x.shape[0], inp.patch_size, inp.patch_size), dtype=np.float32)
+        for input_name, inp in self.inputs.items():
+            xb = np.zeros((self.n_patches * self.n_patches, x[input_name].shape[0], inp.patch_size, inp.patch_size), dtype=np.float32)
 
             k = 0
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
-                    self.extract_patch(xb, x, k, i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), inp.patch_size, inp.downscale)
+                    oi, oj = self.round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
+
+                    self.extract_patch(xb, x[input_name], k, oi, oj, inp.patch_size, inp.downscale)
 
                     k += 1
 
@@ -167,14 +171,13 @@ class ModelPipeline(object):
         p = np.zeros((n_classes, meta['shape'][1], meta['shape'][2]), dtype=np.float32)
         c = np.zeros((n_classes, meta['shape'][1], meta['shape'][2]), dtype=np.float32)
 
-        i_patch_step = (meta['shape'][1] - self.mask_patch_size*self.mask_downscale) / (self.n_patches - 1.0)
-        j_patch_step = (meta['shape'][2] - self.mask_patch_size*self.mask_downscale) / (self.n_patches - 1.0)
-
         k = 0
         for i in xrange(self.n_patches):
             for j in xrange(self.n_patches):
-                si = int(round(i*i_patch_step))
-                sj = int(round(j*j_patch_step))
+                oi, oj = self.round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
+
+                si = int(round(oi * (meta['shape'][1] - self.mask_patch_size*self.mask_downscale)))
+                sj = int(round(oj * (meta['shape'][2] - self.mask_patch_size*self.mask_downscale)))
 
                 p[self.classes, si:si+self.mask_patch_size*self.mask_downscale, sj:sj+self.mask_patch_size*self.mask_downscale] += pb[k] if self.mask_downscale == 1 else self.upscale_mask(pb[k])
                 c[:, si:si+self.mask_patch_size*self.mask_downscale, sj:sj+self.mask_patch_size*self.mask_downscale] += 1
@@ -201,6 +204,17 @@ class ModelPipeline(object):
 
         return res
 
+    def round_offsets(self, oi, oj, img):
+        inp = self.inputs[self.coarse_input]
+
+        ni = img.shape[1] - inp.patch_size*inp.downscale
+        nj = img.shape[2] - inp.patch_size*inp.downscale
+
+        oi = round(oi * ni) / ni
+        oj = round(oj * nj) / nj
+
+        return oi, oj
+
     def load_labelled_patches(self, image_ids):
         print "Loading image patches..."
 
@@ -221,8 +235,7 @@ class ModelPipeline(object):
 
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
-                    oi = i / (self.n_patches - 1.0)
-                    oj = j / (self.n_patches - 1.0)
+                    oi, oj = self.round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
 
                     self.extract_patch(yy, y, k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
@@ -286,6 +299,8 @@ class ModelPipeline(object):
                         oi = np.clip((i + np.random.uniform(-1, 1) * patch_offset_range) / (self.n_patches - 1.0), 0, 1)
                         oj = np.clip((j + np.random.uniform(-1, 1) * patch_offset_range) / (self.n_patches - 1.0), 0, 1)
 
+                        oi, oj = self.round_offsets(oi, oj, input_images[self.coarse_input][img_idx])
+
                         # Add to patch list
                         patches.append((img_idx, oi, oj))
 
@@ -335,8 +350,7 @@ class ModelPipeline(object):
             while k < self.batch_size:
                 img_idx = np.random.randint(len(masks))
 
-                oi = np.random.uniform(0, 1)
-                oj = np.random.uniform(0, 1)
+                oi, oj = self.round_offsets(np.random.uniform(0, 1), np.random.uniform(0, 1), input_images[self.coarse_input][img_idx])
 
                 self.extract_patch(y_batch, masks[img_idx], k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
