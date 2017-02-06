@@ -52,4 +52,4 @@ def analyze_prediction(image_id, pred_id):
     print "Total: pixel %.5f, poly %.5f" % (pixel_jacs.mean(), poly_jacs.mean())
 
 
-analyze_prediction(sys.argv[1], sys.argv[2])
+analyze_prediction(sys.argv[1][:8], sys.argv[1])
