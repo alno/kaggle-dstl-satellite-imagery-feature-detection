@@ -11,7 +11,7 @@ from keras.callbacks import ModelCheckpoint, Callback
 
 
 patch_offset_range = 0.5  # Half of patch size
-channel_shift_range = 0.001
+channel_shift_range = 0.0005
 
 
 debug = False
@@ -19,12 +19,14 @@ debug = False
 
 band_size_factors = {
     'I': 1,
-    'M': 4
+    'M': 4,
+    'A': 4
 }
 
 band_n_channels = {
     'I': 3,
-    'M': 8
+    'M': 8,
+    'A': 8
 }
 
 
@@ -57,7 +59,7 @@ class Normalizer(object):
 
         for c in xrange(images[0].shape[0]):
             self.mins[c] = min(img[c].min() for img in images)
-            self.maxs[c] = max(img[c].max() for img in images)
+            self.maxs[c] = max(np.percentile(img[c], 99) for img in images)
 
         return self
 
@@ -65,7 +67,7 @@ class Normalizer(object):
         res = np.empty(img.shape, dtype=np.float32)
 
         for c in xrange(img.shape[0]):
-            res[c] = (img[c] - self.mins[c]) / (self.maxs[c] - self.mins[c]) - 0.3
+            res[c] = (img[c] - self.mins[c]) / (self.maxs[c] - self.mins[c])
 
         return res
 
@@ -159,6 +161,9 @@ class ModelPipeline(object):
 
         pb = self.model.predict(xbs)
 
+        if debug:
+            self.write_batch_images(xbs, pb, [(0, i / (self.n_patches - 1.0), j / (self.n_patches - 1.0)) for i in xrange(self.n_patches) for j in xrange(self.n_patches)], [image_id], 'pred')
+
         p = np.zeros((n_classes, meta['shape'][1], meta['shape'][2]), dtype=np.float32)
         c = np.zeros((n_classes, meta['shape'][1], meta['shape'][2]), dtype=np.float32)
 
@@ -201,13 +206,14 @@ class ModelPipeline(object):
 
         n = len(image_ids) * self.n_patches * self.n_patches
 
-        yy = np.zeros((n, self.n_classes, self.mask_patch_size, self.mask_patch_size), dtype=np.uint8)
+        yy = np.zeros((n, self.n_classes, self.mask_patch_size, self.mask_patch_size), dtype=np.float32)
         xx = {}
         for input_name, inp in self.inputs.items():
             xx[input_name] = np.zeros((n, inp.n_channels, inp.patch_size, inp.patch_size), dtype=np.float32)
 
         k = 0
-        for image_id in image_ids:
+        patches = []
+        for img_idx, image_id in enumerate(image_ids):
             y = np.load('cache/masks/%s.npy' % image_id)[self.classes]
             x = {}
             for input_name, inp in self.inputs.items():
@@ -215,12 +221,19 @@ class ModelPipeline(object):
 
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
-                    self.extract_patch(yy, y, k, i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), self.mask_patch_size, self.mask_downscale)
+                    oi = i / (self.n_patches - 1.0)
+                    oj = j / (self.n_patches - 1.0)
+
+                    self.extract_patch(yy, y, k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
                     for input_name, inp in self.inputs.items():
-                        self.extract_patch(xx[input_name], x[input_name], k, i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), inp.patch_size, inp.downscale)
+                        self.extract_patch(xx[input_name], x[input_name], k, oi, oj, inp.patch_size, inp.downscale)
 
                     k += 1
+                    patches.append((img_idx, oi, oj))
+
+            if debug:
+                self.write_batch_images(xx, yy, patches, image_ids, 'val')
 
         return xx, yy
 
@@ -246,12 +259,12 @@ class ModelPipeline(object):
                 for c in xrange(x_batch.shape[1]):
                     x_batch[i, c] += np.random.uniform(-channel_shift_range, channel_shift_range)
 
-    def write_batch_images(self, x_batches, y_batch, patches, image_ids):
+    def write_batch_images(self, x_batches, y_batch, patches, image_ids, stage):
         for i, (img_idx, oi, oj) in enumerate(patches):
-            if np.random.random() < 0.01:
+            if y_batch[0].sum() > 5 and np.random.random() < 0.01:
                 for input_name, inp in self.inputs.items():
-                    cv2.imwrite("debug/image_%s_%3f_%3f_%s.png" % (image_ids[img_idx], oi, oj, inp.band), np.rollaxis(np.clip(x_batches[input_name][i, :3], 0, 1) * 255.0, 0, 3).astype(np.uint8))
-                cv2.imwrite("debug/mask_%s_%3f_%3f.png" % (image_ids[img_idx], oi, oj), np.rollaxis(np.clip(y_batch[i, [0, 3, 4]], 0, 1) * 255.0, 0, 3).astype(np.uint8))
+                    cv2.imwrite("debug/%s/%s_%3f_%3f_%s.png" % (stage, image_ids[img_idx], oi, oj, inp.band), np.rollaxis(np.clip(x_batches[input_name][i, :3], 0, 1) * 255.0, 0, 3).astype(np.uint8))
+                cv2.imwrite("debug/%s/%s_%3f_%3f_mask.png" % (stage, image_ids[img_idx], oi, oj), np.rollaxis(np.clip(y_batch[i, [0, 1, 3]], 0, 1) * 255.0, 0, 3).astype(np.uint8))
 
     def load_input_images(self, image_ids):
         input_images = {}
@@ -287,25 +300,25 @@ class ModelPipeline(object):
                 x_batches = {}
                 for input_name, inp in self.inputs.items():
                     x_batches[input_name] = np.zeros((len(batch_patches), inp.n_channels, inp.patch_size, inp.patch_size), dtype=np.float32)
-                y_batch = np.zeros((len(batch_patches), self.n_classes, self.patch_size, self.patch_size), dtype=np.float32)
+                y_batch = np.zeros((len(batch_patches), self.n_classes, self.mask_patch_size, self.mask_patch_size), dtype=np.float32)
 
                 for i, (img_idx, oi, oj) in enumerate(batch_patches):
                     for input_name, inp in self.inputs.items():
-                        self.extract_patch(x_batches[input_name], input_images[img_idx], i, oi, oi, inp.patch_size, inp.downscale)
+                        self.extract_patch(x_batches[input_name], input_images[input_name][img_idx], i, oi, oi, inp.patch_size, inp.downscale)
                     self.extract_patch(y_batch, masks[img_idx], i, oi, oj, self.mask_patch_size, self.mask_downscale)
 
                 self.augment_batch(x_batches, y_batch)
 
                 # Write debug images
                 if debug:
-                    self.write_batch_images(x_batches, y_batch, patches, image_ids)
+                    self.write_batch_images(x_batches, y_batch, patches, image_ids, 'train')
 
                 yield x_batches, y_batch
 
                 batch_start += self.batch_size
 
     def random_batch_generator(self, image_ids, input_images):
-        threshold = 1
+        threshold = 5
 
         masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
 
@@ -341,6 +354,6 @@ class ModelPipeline(object):
 
             # Write debug images
             if debug:
-                self.write_batch_images(x_batches, y_batch, patches, image_ids)
+                self.write_batch_images(x_batches, y_batch, patches, image_ids, 'train')
 
             yield x_batches, y_batch

@@ -1,5 +1,5 @@
 from util.meta import locations
-from util import save_pickle
+from util import load_pickle, save_pickle
 
 import tifffile as tiff
 import numpy as np
@@ -8,9 +8,18 @@ import cv2
 n_location_images = 5
 
 
-def read_location_images(loc, directory, kind=None):
-    if kind is not None:
-        suffix = '_' + kind
+def resize(src, shape):
+    dst = np.empty(shape=(src.shape[0], shape[0], shape[1]))
+
+    for c in xrange(src.shape[0]):
+        dst[c] = cv2.resize(src[c], (shape[1], shape[0]), interpolation=cv2.INTER_CUBIC)
+
+    return dst
+
+
+def read_location_images(loc, directory, band=None, resize_to=None):
+    if band is not None:
+        suffix = '_' + band
     else:
         suffix = ''
 
@@ -22,12 +31,17 @@ def read_location_images(loc, directory, kind=None):
 
         for j in xrange(n_location_images):
             img = tiff.imread('../input/%s/%s_%d_%d%s.tif' % (directory, loc, i, j, suffix))
+
+            if resize_to is not None:
+                meta = load_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j))
+                img = resize(img, meta[resize_to][1:])
+
             imgs[i].append(img)
 
     return imgs
 
 
-def write_location_images(loc, imgs, kind):
+def write_location_images(loc, imgs, band):
     ys = [0]
     xs = [0]
 
@@ -57,7 +71,7 @@ def write_location_images(loc, imgs, kind):
             ysz = img.shape[1]
             xsz = img.shape[2]
 
-            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, kind), data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz])
+            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, band), data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz])
 
     # Save debug location map
     if False:
@@ -80,5 +94,8 @@ for loc in locations:
 
     write_location_images(loc, imgs_i, 'I')
     write_location_images(loc, imgs_m, 'M')
+
+    imgs_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
+    write_location_images(loc, imgs_a, 'A')
 
 print "Done."
