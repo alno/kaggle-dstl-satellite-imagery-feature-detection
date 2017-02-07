@@ -7,7 +7,7 @@ from util.masks import poly_to_mask, mask_to_poly
 from util.data import grid_sizes
 
 
-def plot_prediction(image_id, cls=0):
+def plot_prediction(image_id, pred_id, cls=0):
     image = np.load('cache/images/%s.npy' % image_id)
     pred = np.load('cache/preds/%s.npy' % image_id)
 
@@ -25,6 +25,7 @@ def plot_prediction(image_id, cls=0):
     ax3.set_title('predict bldg polygones')
     ax3.imshow(poly_to_mask(mask_to_poly(pred[cls], xymax), image.shape[1:], xymax), cmap=plt.get_cmap('hot'))
 
+    plt.title("%s - class %d" % (pred_id, cls))
     plt.show()
 
 
@@ -40,6 +41,7 @@ def plot_all_class_predictions(image_id, pred_id):
     for c in xrange(9):
         ax[(c+1) // 5][(c+1) % 5].imshow(np.dstack((mask[c], pred[c], np.zeros(mask[c].shape))))
 
+    plt.title(pred_id)
     plt.tight_layout()
     plt.show()
 
@@ -48,6 +50,7 @@ def plot_class_prediction(image_id, pred_id, c):
     mask = np.load('cache/masks/%s.npy' % image_id)
     pred = np.load('cache/preds/%s.npy' % pred_id)
 
+    plt.title("%s - class %d" % (pred_id, c))
     plt.imshow(np.dstack((mask[c], pred[c], np.zeros(mask[c].shape))))
     plt.show()
 
