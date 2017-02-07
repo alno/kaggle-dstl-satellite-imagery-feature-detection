@@ -212,7 +212,7 @@ def unet3(input_shapes, n_classes):
     pool1 = pool_block(conv1, 2)
 
     conv2 = conv_block(pool1, 64)
-    conv2 = conv_block(conv2, 128)
+    conv2 = conv_block(conv2, 96)
     pool2 = pool_block(conv2, 2)
 
     conv3 = conv_block(pool2, 96)
@@ -223,7 +223,7 @@ def unet3(input_shapes, n_classes):
     conv4 = conv_block(conv4, 256)
     pool4 = pool_block(conv4, 2)
 
-    conv5 = conv_block(pool4, 256)
+    conv5 = conv_block(pool4, 512)
     conv5 = conv_block(conv5, 256)
 
     up6 = merge_block(conv5, conv4, mode='sum')
