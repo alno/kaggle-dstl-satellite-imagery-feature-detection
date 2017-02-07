@@ -1,6 +1,8 @@
 from util.meta import locations
 from util import load_pickle, save_pickle
 
+from skimage.filters import sobel
+
 import tifffile as tiff
 import numpy as np
 import cv2
@@ -41,7 +43,7 @@ def read_location_images(loc, directory, band=None, resize_to=None):
     return imgs
 
 
-def write_location_images(loc, imgs, band):
+def write_location_images(loc, imgs, band, filters=False):
     ys = [0]
     xs = [0]
 
@@ -77,6 +79,19 @@ def write_location_images(loc, imgs, band):
     if False:
         cv2.imwrite("%s.png" % loc, np.rollaxis((data - data.min()) * 255.0 / (data.max() - data.min()), 0, 3).astype(np.uint8))
 
+    # Compute and save filters
+    if filters:
+        filter_data = np.zeros((1, ys[-1], xs[-1]), dtype=np.float32)
+        filter_data[0] = sobel(np.clip(data[0] / 600.0, 0, 1)) + sobel(np.clip(data[1] / 600.0, 0, 1)) + sobel(np.clip(data[2] / 600.0, 0, 1))
+
+        for i in xrange(n_location_images):
+            for j in xrange(n_location_images):
+                img = imgs[i][j]
+                ysz = img.shape[1]
+                xsz = img.shape[2]
+
+                np.save('cache/images/%s_%d_%d_%sF.npy' % (loc, i, j, band), filter_data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz])
+
 
 print "Preparing image data..."
 
@@ -92,7 +107,7 @@ for loc in locations:
         for j in xrange(n_location_images):
             save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), {'shape': imgs_i[i][j].shape, 'shape_m': imgs_m[i][j].shape})
 
-    write_location_images(loc, imgs_i, 'I')
+    write_location_images(loc, imgs_i, 'I', filters=True)
     write_location_images(loc, imgs_m, 'M')
 
     imgs_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
