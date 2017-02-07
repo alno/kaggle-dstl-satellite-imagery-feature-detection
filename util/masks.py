@@ -118,12 +118,11 @@ def mask_to_poly(mask, xymax, epsilon=2, min_area=1., threshold=0.5):
             all_polygons.append(poly)
 
     # approximating polygons might have created invalid ones, fix them
-    all_polygons = MultiPolygon(all_polygons)
-    if not all_polygons.is_valid:
-        all_polygons = all_polygons.buffer(0)
-        # Sometimes buffer() converts a simple Multipolygon to just a Polygon,
-        # need to keep it a Multi throughout
-        if all_polygons.type == 'Polygon':
-            all_polygons = MultiPolygon([all_polygons])
+    all_polygons = MultiPolygon(all_polygons).buffer(0)
+
+    # Sometimes buffer() converts a simple Multipolygon to just a Polygon,
+    # need to keep it a Multi throughout
+    if all_polygons.type == 'Polygon':
+        all_polygons = MultiPolygon([all_polygons])
 
     return convert_poly_to_geo_coords(all_polygons, mask.shape, xymax)
