@@ -157,7 +157,7 @@ class ModelPipeline(object):
 
         self.epoch_batches = epoch_batches
 
-        self.augmeter = Augmenter(**augment)
+        self.augmenter = Augmenter(**augment)
 
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
@@ -168,7 +168,7 @@ class ModelPipeline(object):
         self.input_normalizers = load_pickle('cache/models/%s-norm.pickle' % self.name)
         self.model.load_weights('cache/models/%s.hdf5' % self.name)
 
-    def fit(self, train_image_ids, val_image_ids=None):
+    def fit(self, train_image_ids, val_image_ids=None, epoch_mult=1.0):
         print "Fitting normalizers..."
 
         train_input_images = self.load_input_images(train_image_ids)
@@ -198,7 +198,7 @@ class ModelPipeline(object):
         self.model.fit_generator(
             generator,
             samples_per_epoch=n_samples,
-            nb_epoch=self.n_epoch, verbose=1,
+            nb_epoch=int(self.n_epoch * epoch_mult), verbose=1,
             callbacks=callbacks, validation_data=validation_data)
         self.model.save_weights('cache/models/%s.hdf5' % self.name)
 
