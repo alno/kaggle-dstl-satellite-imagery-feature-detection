@@ -108,7 +108,12 @@ if not args.no_full:
         pipeline.load()
 
     if not args.no_train:
-        pipeline.fit(full_train_image_ids)
+        if preset.get('batch_mode') == 'random':
+            epoch_mult = len(full_train_image_ids) * 1.0 / len(val_train_image_ids)
+        else:
+            epoch_mult = 1.0
+
+        pipeline.fit(full_train_image_ids, epoch_mult=epoch_mult)
 
     if not args.no_predict:
         subm = sample_submission.copy()
