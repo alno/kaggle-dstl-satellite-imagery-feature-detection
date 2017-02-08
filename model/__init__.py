@@ -9,10 +9,8 @@ from util import load_pickle, save_pickle
 
 from keras.callbacks import ModelCheckpoint, Callback
 
-
-patch_offset_range = 0.5  # Half of patch size
-channel_shift_range = 0.0005
-
+patch_offset_range = 0.5
+round_offsets = True
 
 debug = False
 
@@ -52,27 +50,37 @@ def extract_patch(xx, x, k, oi, oj, patch_size, downscale):
             xx[k, c] = cv2.resize(x[c, si:si+patch_size*downscale, sj:sj+patch_size*downscale].astype(np.float32), (patch_size, patch_size), interpolation=cv2.INTER_LINEAR)
 
 
-def augment_batch(x_batches, y_batch):
-    for i in xrange(y_batch.shape[0]):
-        if np.random.random() < 0.5:  # Mirror by x
-            for x_batch in x_batches.values():
-                x_batch[i] = x_batch[i, :, ::-1, :]
-            y_batch[i] = y_batch[i, :, ::-1, :]
+class Augmenter(object):
 
-        if np.random.random() < 0.5:  # Mirror by y
-            for x_batch in x_batches.values():
-                x_batch[i] = x_batch[i, :, :, ::-1]
-            y_batch[i] = y_batch[i, :, :, ::-1]
+    def __init__(self, channel_shift_range=0.0005, channel_scale_range=0.0001):
+        self.channel_shift_range = channel_shift_range
+        self.channel_scale_range = channel_scale_range
 
-        if np.random.random() < 0.5:  # Rotate
-            for x_batch in x_batches.values():
-                x_batch[i] = np.swapaxes(x_batch[i], 1, 2)
-            y_batch[i] = np.swapaxes(y_batch[i], 1, 2)
+    def augment_batch(self, x_batches, y_batch):
+        for i in xrange(y_batch.shape[0]):
+            if np.random.random() < 0.5:  # Mirror by x
+                for x_batch in x_batches.values():
+                    x_batch[i] = x_batch[i, :, ::-1, :]
+                y_batch[i] = y_batch[i, :, ::-1, :]
 
-        # Apply random channel shift
-        for x_batch in x_batches.values():
-            for c in xrange(x_batch.shape[1]):
-                x_batch[i, c] += np.random.uniform(-channel_shift_range, channel_shift_range)
+            if np.random.random() < 0.5:  # Mirror by y
+                for x_batch in x_batches.values():
+                    x_batch[i] = x_batch[i, :, :, ::-1]
+                y_batch[i] = y_batch[i, :, :, ::-1]
+
+            if np.random.random() < 0.5:  # Rotate
+                for x_batch in x_batches.values():
+                    x_batch[i] = np.swapaxes(x_batch[i], 1, 2)
+                y_batch[i] = np.swapaxes(y_batch[i], 1, 2)
+
+            # Apply random channel scale and shift
+            for input_name, x_batch in x_batches.items():
+                if 'F' in input_name:  # Don't augment channels for filters input
+                    continue
+
+                for c in xrange(x_batch.shape[1]):
+                    x_batch[i, c] *= np.random.uniform(1-self.channel_scale_range, 1+self.channel_scale_range)
+                    x_batch[i, c] += np.random.uniform(-self.channel_shift_range, self.channel_shift_range)
 
 
 class Monitor(Callback):
@@ -128,7 +136,7 @@ class Normalizer(object):
 
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, n_epoch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), batch_mode='grid', batch_size=64, epoch_batches=100):
+    def __init__(self, name, arch, n_epoch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), batch_mode='grid', batch_size=64, epoch_batches=100, augment={}):
         self.name = name
         self.arch = arch
         self.n_epoch = n_epoch
@@ -148,6 +156,8 @@ class ModelPipeline(object):
         self.batch_size = batch_size
 
         self.epoch_batches = epoch_batches
+
+        self.augmeter = Augmenter(**augment)
 
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
@@ -190,6 +200,7 @@ class ModelPipeline(object):
             samples_per_epoch=n_samples,
             nb_epoch=self.n_epoch, verbose=1,
             callbacks=callbacks, validation_data=validation_data)
+        self.model.save_weights('cache/models/%s.hdf5' % self.name)
 
     def fit_and_apply_normalizers(self, input_images):
         self.input_normalizers = {}
@@ -215,7 +226,11 @@ class ModelPipeline(object):
             k = 0
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
-                    oi, oj = self.inputs[self.coarse_input].round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
+                    oi = i / (self.n_patches - 1.0)
+                    oj = j / (self.n_patches - 1.0)
+
+                    if round_offsets:
+                        oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, x[self.coarse_input])
 
                     extract_patch(xb, x[input_name], k, oi, oj, inp.patch_size, inp.downscale)
 
@@ -234,7 +249,11 @@ class ModelPipeline(object):
         k = 0
         for i in xrange(self.n_patches):
             for j in xrange(self.n_patches):
-                oi, oj = self.inputs[self.coarse_input].round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
+                oi = i / (self.n_patches - 1.0)
+                oj = j / (self.n_patches - 1.0)
+
+                if round_offsets:
+                    oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, x[self.coarse_input])
 
                 si = int(round(oi * (meta['shape'][1] - self.mask_patch_size*self.mask_downscale)))
                 sj = int(round(oj * (meta['shape'][2] - self.mask_patch_size*self.mask_downscale)))
@@ -264,7 +283,11 @@ class ModelPipeline(object):
 
             for i in xrange(self.n_patches):
                 for j in xrange(self.n_patches):
-                    oi, oj = self.inputs[self.coarse_input].round_offsets(i / (self.n_patches - 1.0), j / (self.n_patches - 1.0), x[self.coarse_input])
+                    oi = i / (self.n_patches - 1.0)
+                    oj = j / (self.n_patches - 1.0)
+
+                    if round_offsets:
+                        oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, x[self.coarse_input])
 
                     extract_patch(yy, y, k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
@@ -306,7 +329,8 @@ class ModelPipeline(object):
                         oi = np.clip((i + np.random.uniform(-1, 1) * patch_offset_range) / (self.n_patches - 1.0), 0, 1)
                         oj = np.clip((j + np.random.uniform(-1, 1) * patch_offset_range) / (self.n_patches - 1.0), 0, 1)
 
-                        oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, input_images[self.coarse_input][img_idx])
+                        if round_offsets:
+                            oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, input_images[self.coarse_input][img_idx])
 
                         # Add to patch list
                         patches.append((img_idx, oi, oj))
@@ -329,7 +353,7 @@ class ModelPipeline(object):
                         extract_patch(x_batches[input_name], input_images[input_name][img_idx], i, oi, oi, inp.patch_size, inp.downscale)
                     extract_patch(y_batch, masks[img_idx], i, oi, oj, self.mask_patch_size, self.mask_downscale)
 
-                augment_batch(x_batches, y_batch)
+                self.augmenter.augment_batch(x_batches, y_batch)
 
                 # Write debug images
                 if debug:
@@ -357,7 +381,11 @@ class ModelPipeline(object):
             while k < self.batch_size:
                 img_idx = np.random.randint(len(masks))
 
-                oi, oj = self.inputs[self.coarse_input].round_offsets(np.random.uniform(0, 1), np.random.uniform(0, 1), input_images[self.coarse_input][img_idx])
+                oi = np.random.uniform(0, 1)
+                oj = np.random.uniform(0, 1)
+
+                if round_offsets:
+                    oi, oj = self.inputs[self.coarse_input].round_offsets(oi, oj, input_images[self.coarse_input][img_idx])
 
                 extract_patch(y_batch, masks[img_idx], k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
@@ -371,7 +399,7 @@ class ModelPipeline(object):
                 k += 1
 
             # Augment them
-            augment_batch(x_batches, y_batch)
+            self.augmenter.augment_batch(x_batches, y_batch)
 
             # Write debug images
             if debug:
