@@ -8,12 +8,21 @@ import shapely.wkt
 
 import argparse
 
-from util.meta import val_train_image_ids, val_test_image_ids, full_train_image_ids
-from util.data import grid_sizes, sample_submission
+from util.meta import val_train_image_ids, val_test_image_ids, full_train_image_ids, n_classes, class_names
+from util.data import grid_sizes, sample_submission, train_wkt
 from util.masks import mask_to_poly
 
 from model import ModelPipeline
 from model.presets import presets
+
+
+cls_opts = {
+}
+
+cls_thr = {
+    1: 0.2
+}
+
 
 parser = argparse.ArgumentParser(description='Train model')
 parser.add_argument('preset', type=str, help='model preset (features and hyperparams)')
@@ -44,17 +53,50 @@ if not args.no_val:
         pipeline.fit(val_train_image_ids, val_test_image_ids)
 
     if not args.no_predict:
+
+        pixel_intersections = np.zeros(n_classes)
+        pixel_unions = np.zeros(n_classes) + 1e-12
+
+        poly_intersections = np.zeros(n_classes)
+        poly_unions = np.zeros(n_classes) + 1e-12
+
         for image_id in val_test_image_ids:
             sys.stdout.write("  Processing %s... " % (image_id))
             sys.stdout.flush()
 
             start_time = time.time()
 
-            p = pipeline.predict(image_id)
-            np.save('cache/preds/%s-%s.npy' % (image_id, preset_name), p)
+            mask = np.load('cache/masks/%s.npy' % image_id)
+            pred = pipeline.predict(image_id)
+            np.save('cache/preds/%s-%s.npy' % (image_id, preset_name), pred)
+
+            xymax = (grid_sizes.loc[image_id, 'xmax'], grid_sizes.loc[image_id, 'ymin'])
+
+            for cls in xrange(n_classes):
+                cls_pred = pred[cls] > cls_thr.get(cls, 0.5)
+                cls_pixel_inter = (cls_pred & mask[cls]).sum()
+                cls_pixel_union = (cls_pred | mask[cls]).sum()
+
+                pixel_intersections[cls] += cls_pixel_inter
+                pixel_unions[cls] += cls_pixel_union
+
+                true_poly = shapely.wkt.loads(train_wkt.loc[(train_wkt['image_id'] == image_id) & (train_wkt['cls'] == cls+1), 'multi_poly_wkt'].iloc[0])
+                pred_poly = mask_to_poly(cls_pred, xymax, **cls_opts.get(cls, {}))
+
+                poly_intersections[cls] += pred_poly.intersection(true_poly).area
+                poly_unions[cls] += pred_poly.union(true_poly).area
 
             print "Done in %d seconds" % (time.time() - start_time)
 
+        pixel_jacs = np.zeros(n_classes)
+        poly_jacs = np.zeros(n_classes)
+        for cls in xrange(n_classes):
+            pixel_jacs[cls] = pixel_intersections[cls] / pixel_unions[cls]
+            poly_jacs[cls] = poly_intersections[cls] / poly_unions[cls]
+
+            print "Class %d (%s), thr=%.3f: pixel %.5f, poly %.5f" % (cls, class_names[cls], cls_thr.get(cls, 0.5), pixel_jacs[cls], poly_jacs[cls])
+
+        print "Total: pixel %.5f, poly %.5f" % (pixel_jacs.mean(), poly_jacs.mean())
 
 # Full pass
 if not args.no_full:
@@ -81,7 +123,7 @@ if not args.no_full:
             xymax = (grid_sizes.loc[image_id, 'xmax'], grid_sizes.loc[image_id, 'ymin'])
 
             for cls in subm.loc[subm['ImageId'] == image_id, 'ClassType'].unique():
-                subm.loc[(subm['ImageId'] == image_id) & (subm['ClassType'] == cls), 'MultipolygonWKT'] = shapely.wkt.dumps(mask_to_poly(mask[cls - 1], xymax))
+                subm.loc[(subm['ImageId'] == image_id) & (subm['ClassType'] == cls), 'MultipolygonWKT'] = shapely.wkt.dumps(mask_to_poly(mask[cls - 1], xymax), rounding_precision=8)
 
             print "Done in %d seconds" % (time.time() - start_time)
 
