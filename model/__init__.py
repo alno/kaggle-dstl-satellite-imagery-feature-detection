@@ -6,8 +6,10 @@ from math import ceil
 from util.meta import n_classes
 from util import load_pickle, save_pickle
 
-
 from keras.callbacks import ModelCheckpoint, Callback
+from keras.optimizers import Adam
+
+from .objectives import combined_loss, jaccard_coef, jaccard_coef_int
 
 patch_offset_range = 0.5
 round_offsets = True
@@ -28,6 +30,20 @@ band_n_channels = {
     'M': 8,
     'A': 8
 }
+
+
+class_priors = np.array([
+    0.3,
+    0.1,
+    0.2,
+    0.2,
+    0.2,
+    0.2,
+    0.1,
+    0.05,
+    0.0001,
+    0.0001,
+])
 
 
 def upscale_mask(m, downscale):
@@ -83,16 +99,33 @@ class Augmenter(object):
                     x_batch[i, c] += np.random.uniform(-self.channel_shift_range, self.channel_shift_range)
 
 
-class Monitor(Callback):
+class Validator(Callback):
 
     def __init__(self, pipeline, image_ids):
         self.pipeline = pipeline
         self.image_ids = image_ids
+        self.image_masks = dict((image_id, np.load('cache/masks/%s.npy' % image_id)) for image_id in image_ids)
 
     def on_epoch_end(self, epoch, logs={}):
+        class_intersections = np.zeros(n_classes, dtype=np.float64)
+        class_unions = np.zeros(n_classes, dtype=np.float64) + 1e-7
+
         for image_id in self.image_ids:
-            p = self.pipeline.predict(image_id)
-            np.save('cache/preds/%s_%s.npy' % (image_id, self.pipeline.name), p)
+            pred = self.pipeline.predict(image_id)
+            mask = self.image_masks[image_id]
+
+            np.save('cache/preds/%s_%s.npy' % (image_id, self.pipeline.name), pred)
+
+            inter = (pred * mask).sum(axis=(1, 2))
+            union = (pred + mask).sum(axis=(1, 2)) - inter
+
+            class_intersections += inter
+            class_unions += union
+
+        class_jacs = class_intersections / class_unions
+
+        print
+        print "val jac: [%s], val jac mean: %s" % (' '.join('%.5f' % j for j in class_jacs), class_jacs.mean())
 
 
 class Input(object):
@@ -193,7 +226,12 @@ class ModelPipeline(object):
         callbacks = [ModelCheckpoint('cache/models/%s.hdf5' % self.name, monitor='loss', save_best_only=True)]
 
         if val_image_ids is not None:
-            callbacks.append(Monitor(self, ['6100_2_2']))
+            callbacks.append(Validator(self, val_image_ids))
+
+        def loss(y, p):
+            return combined_loss(y, p, 100, class_priors[self.classes])
+
+        self.model.compile(optimizer=Adam(3e-3, decay=4e-4), loss=loss, metrics=[jaccard_coef, jaccard_coef_int])
 
         self.model.fit_generator(
             generator,
@@ -364,7 +402,7 @@ class ModelPipeline(object):
                 batch_start += self.batch_size
 
     def random_batch_generator(self, image_ids, input_images):
-        threshold = 1
+        threshold = 0
 
         masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
 
