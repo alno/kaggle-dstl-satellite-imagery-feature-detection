@@ -107,25 +107,43 @@ class Validator(Callback):
         self.image_masks = dict((image_id, np.load('cache/masks/%s.npy' % image_id)) for image_id in image_ids)
 
     def on_epoch_end(self, epoch, logs={}):
+        if (epoch+1) % 5 != 0:
+            return
+
+        print
+        print "  Validating epoch %d.." % (epoch+1)
+
         class_intersections = np.zeros(n_classes, dtype=np.float64)
         class_unions = np.zeros(n_classes, dtype=np.float64) + 1e-7
 
+        class_intersections_int = np.zeros(n_classes, dtype=np.float64)
+        class_unions_int = np.zeros(n_classes, dtype=np.float64) + 1e-7
+
         for image_id in self.image_ids:
-            pred = self.pipeline.predict(image_id)
             mask = self.image_masks[image_id]
+
+            pred = self.pipeline.predict(image_id)
+            pred_int = pred > 0.5
 
             np.save('cache/preds/%s_%s.npy' % (image_id, self.pipeline.name), pred)
 
             inter = (pred * mask).sum(axis=(1, 2))
             union = (pred + mask).sum(axis=(1, 2)) - inter
 
+            inter_int = (pred_int * mask).sum(axis=(1, 2))
+            union_int = (pred_int + mask).sum(axis=(1, 2)) - inter_int
+
             class_intersections += inter
             class_unions += union
 
-        class_jacs = class_intersections / class_unions
+            class_intersections_int += inter_int
+            class_unions_int += union_int
 
-        print
-        print "val jac: [%s], val jac mean: %s" % (' '.join('%.5f' % j for j in class_jacs), class_jacs.mean())
+        class_jacs = class_intersections / class_unions
+        class_jacs_int = class_intersections_int / class_unions_int
+
+        print "  Class jac: [%s], mean jac: %s" % (' '.join('%.5f' % j for j in class_jacs), class_jacs.mean())
+        print "  Class jac_int: [%s], mean jac_int: %s" % (' '.join('%.5f' % j for j in class_jacs_int), class_jacs_int.mean())
 
 
 class Input(object):
@@ -217,10 +235,6 @@ class ModelPipeline(object):
             generator = self.random_batch_generator(train_image_ids, train_input_images)
             n_samples = self.epoch_batches * self.batch_size
 
-        print "Loading validation data..."
-
-        validation_data = val_image_ids and self.load_labelled_patches(val_image_ids)
-
         print "Training model with %d params..." % self.model.count_params()
 
         callbacks = [ModelCheckpoint('cache/models/%s.hdf5' % self.name, monitor='loss', save_best_only=True)]
@@ -237,7 +251,7 @@ class ModelPipeline(object):
             generator,
             samples_per_epoch=n_samples,
             nb_epoch=int(self.n_epoch * epoch_mult), verbose=1,
-            callbacks=callbacks, validation_data=validation_data)
+            callbacks=callbacks)
         self.model.save_weights('cache/models/%s.hdf5' % self.name)
 
     def fit_and_apply_normalizers(self, input_images):
