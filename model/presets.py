@@ -1,4 +1,4 @@
-from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi
+from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi, unet_vgg16
 
 presets = {
     'u1i': {
@@ -136,6 +136,37 @@ presets = {
             'channel_shift_range': 0.01,
             'channel_scale_range': 0.01
         }
+    },
+
+    'uvi': {
+        'arch': unet_vgg16,
+        'n_epoch': 100,
+        'mask_patch_size': 128,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'inputs': {
+            'in_I': {'band': 'I'},
+        },
+        'augment': {
+            'channel_shift_range': 0.01,
+            'channel_scale_range': 0.01
+        }
+    },
+
+    'uvi_structs': {
+        'arch': unet_vgg16,
+        'n_epoch': 150,
+        'mask_patch_size': 128,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'inputs': {
+            'in_I': {'band': 'I'},
+        },
+        'augment': {
+            'channel_shift_range': 0.01,
+            'channel_scale_range': 0.01
+        },
+        'classes': [0, 1]
     },
 
     'u2mi_structs': {

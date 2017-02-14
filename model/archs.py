@@ -3,6 +3,7 @@ from keras.models import Model
 from keras.layers import Input, merge, Convolution2D, MaxPooling2D, AveragePooling2D, UpSampling2D, Activation, Dropout, BatchNormalization, AtrousConvolution2D, Lambda
 from keras.layers.advanced_activations import ELU, LeakyReLU, PReLU
 from keras.regularizers import l2
+from keras.applications import VGG16
 
 
 def unet(input_shapes, n_classes):
@@ -544,6 +545,38 @@ def unet2_mi(input_shapes, n_classes):
 
     conv5 = conv_block(pool4, 512)
     conv5 = conv_block(conv5, 512)
+
+    up6 = merge_block(conv5, conv4)
+    conv6 = conv_block(up6, 256)
+    conv6 = conv_block(conv6, 256)
+
+    up7 = merge_block(conv6, conv3)
+    conv7 = conv_block(up7, 128)
+    conv7 = conv_block(conv7, 128)
+
+    up8 = merge_block(conv7, conv2)
+    conv8 = conv_block(up8, 96)
+    conv8 = conv_block(conv8, 96)
+
+    up9 = merge_block(conv8, conv1)
+    conv9 = conv_block(up9, 64)
+    conv9 = conv_block(conv9, 64)
+
+    conv10 = Convolution2D(n_classes, 3, 3, activation='sigmoid', border_mode='same')(conv9)
+
+    return Model(input=inputs.values(), output=conv10)
+
+
+def unet_vgg16(input_shapes, n_classes):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    vgg = VGG16(include_top=False, input_tensor=inputs['in_I'])
+
+    conv1 = vgg.get_layer('block1_conv2').output
+    conv2 = vgg.get_layer('block2_conv2').output
+    conv3 = vgg.get_layer('block3_conv3').output
+    conv4 = vgg.get_layer('block4_conv3').output
+    conv5 = vgg.get_layer('block5_conv3').output
 
     up6 = merge_block(conv5, conv4)
     conv6 = conv_block(up6, 256)
