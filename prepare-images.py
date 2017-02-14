@@ -34,6 +34,9 @@ def read_location_images(loc, directory, band=None, resize_to=None):
         for j in xrange(n_location_images):
             img = tiff.imread('../input/%s/%s_%d_%d%s.tif' % (directory, loc, i, j, suffix))
 
+            if len(img.shape) == 2:
+                img = img[np.newaxis, :, :]
+
             if resize_to is not None:
                 meta = load_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j))
                 img = resize(img, meta[resize_to][1:])
@@ -101,14 +104,16 @@ for loc in locations:
 
     imgs_i = read_location_images(loc, 'three_band')
     imgs_m = read_location_images(loc, 'sixteen_band', 'M')
+    imgs_p = read_location_images(loc, 'sixteen_band', 'P')
 
     # Prepare images
     for i in xrange(n_location_images):
         for j in xrange(n_location_images):
-            save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), {'shape': imgs_i[i][j].shape, 'shape_m': imgs_m[i][j].shape})
+            save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), {'shape': imgs_i[i][j].shape, 'shape_m': imgs_m[i][j].shape, 'shape_p': imgs_p[i][j].shape})
 
     write_location_images(loc, imgs_i, 'I', filters=True)
     write_location_images(loc, imgs_m, 'M')
+    write_location_images(loc, imgs_p, 'P')
 
     imgs_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
     write_location_images(loc, imgs_a, 'A')
