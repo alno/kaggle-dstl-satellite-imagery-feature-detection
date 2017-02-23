@@ -1,4 +1,6 @@
-from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi, unet_vgg16
+from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi, unet_vgg16, unet_water, rnet3, unet4_mi, dnet1_mi, dnet2
+
+from keras.optimizers import Adam
 
 presets = {
     'u1i': {
@@ -90,6 +92,74 @@ presets = {
         }
     },
 
+    'r2m_areas': {
+        'arch': rnet2,
+        'n_epoch': 70,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 48,
+        'inputs': {
+            'in_I': {'band': 'I', 'downscale': 4},
+            'in_IF': {'band': 'IF', 'downscale': 4},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'classes': [4, 5, 6, 7]
+    },
+
+    'r2m_2': {
+        'arch': rnet2,
+        'n_epoch': 70,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 48,
+        'inputs': {
+            'in_I': {'band': 'I', 'downscale': 4},
+            'in_IF': {'band': 'IF', 'downscale': 4},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'classes': [0, 1, 2, 3, 4, 5]
+    },
+
+    'r3m_1': {
+        'arch': rnet3,
+        'n_epoch': 70,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 48,
+        'inputs': {
+            'in_I': {'band': 'I', 'downscale': 4},
+            'in_IF': {'band': 'IF', 'downscale': 4},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'classes': [0, 1, 2, 3, 4, 5]
+    },
+
+    'r3m_2': {
+        'arch': rnet3,
+        'n_epoch': 70,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 48,
+        'inputs': {
+            'in_I': {'band': 'I', 'downscale': 4},
+            'in_IF': {'band': 'IF', 'downscale': 4},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'mirror': False,
+            'rotate': False
+        },
+        'classes': [0, 1, 2, 3, 4, 5]
+    },
+
     'r1mi': {
         'arch': rnet1_mi,
         'n_epoch': 100,
@@ -136,6 +206,26 @@ presets = {
             'channel_shift_range': 0.01,
             'channel_scale_range': 0.01
         }
+    },
+
+    'u_water': {
+        'arch': unet_water,
+        'n_epoch': 100,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'inputs': {
+            'in_I': {'band': 'I', 'downscale': 4},
+            'in_IF': {'band': 'IF', 'downscale': 4},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'channel_shift_range': 1e-4,
+            'channel_scale_range': 1e-4
+        },
+        'classes': [6, 7]
     },
 
     'uvi': {
@@ -349,5 +439,89 @@ presets = {
             'in_M': {'band': 'M'}
         },
         'classes': [8, 9]
+    },
+
+    'u4mi_str': {
+        'arch': unet4_mi,
+        'n_epoch': 100,
+        'mask_patch_size': 112,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'epoch_batches': 200,
+        'inputs': {
+            'in_I': {'band': 'I'},
+            'in_IF': {'band': 'IF'},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'mirror': False,
+            'rotate': False
+        },
+        'classes': [0, 1, 4]
+    },
+
+    'u4mi_str_2': {
+        'arch': unet4_mi,
+        'n_epoch': 100,
+        'mask_patch_size': 160,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'epoch_batches': 100,
+        'inputs': {
+            'in_I': {'band': 'I'},
+            'in_IF': {'band': 'IF'},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'mirror': False,
+            'rotate': False
+        },
+        'classes': [0, 1, 4],
+#        'optimizer': Adam(1e-2, decay=4e-4)
+    },
+
+    'd1mi_str_2': {
+        'arch': dnet1_mi,
+        'n_epoch': 70,
+        'mask_patch_size': 160,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'epoch_batches': 100,
+        'inputs': {
+            'in_I': {'band': 'I'},
+            'in_IF': {'band': 'IF'},
+            'in_M': {'band': 'M'},
+            'in_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'mirror': False,
+            'rotate': False
+        },
+        'classes': [0, 1, 4],
+#        'optimizer': Adam(1e-2, decay=4e-4)
+    },
+
+    'd2_1': {
+        'arch': dnet2,
+        'n_epoch': 300,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'batch_mode': 'random',
+        'batch_size': 32,
+        'epoch_batches': 100,
+        'inputs': {
+            'd0_I': {'band': 'I', 'downscale': 4},
+            'd0_IF': {'band': 'IF', 'downscale': 4},
+            'd0_M': {'band': 'M'},
+            'd0_MI': {'band': 'MI'},
+        },
+        'augment': {
+            'mirror': False,
+            'rotate': False
+        },
+        'classes': [0, 1, 2, 3, 4, 5, 6, 7],
+        'optimizer': Adam(1e-2, decay=2e-4)
     },
 }
