@@ -2,6 +2,7 @@ from util.meta import locations
 from util import load_pickle, save_pickle
 
 from skimage.filters import sobel
+from joblib import Parallel, delayed
 
 import tifffile as tiff
 import numpy as np
@@ -43,10 +44,6 @@ def read_location_images(loc, directory, band=None, resize_to=None):
 
             imgs[i].append(img)
 
-    return imgs
-
-
-def write_location_images(loc, imgs, band, filters=False):
     ys = [0]
     xs = [0]
 
@@ -63,59 +60,80 @@ def write_location_images(loc, imgs, band, filters=False):
     # Copy image data to the matrix
     for i in xrange(n_location_images):
         for j in xrange(n_location_images):
-            img = imgs[i][j]
-            ysz = img.shape[1]
-            xsz = img.shape[2]
+            data[:, ys[i]:ys[i+1], xs[j]:xs[j+1]] = imgs[i][j]
 
-            data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz] = img
+    return data, xs, ys
 
+
+def write_location_images(loc, data, xs, ys, band, filters=False):
     # Save images
     for i in xrange(n_location_images):
         for j in xrange(n_location_images):
-            img = imgs[i][j]
-            ysz = img.shape[1]
-            xsz = img.shape[2]
-
-            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, band), data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz])
+            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, band), data[:, ys[i]:ys[i+1], xs[j]:xs[j+1]])
 
     # Save debug location map
     if False:
         cv2.imwrite("%s.png" % loc, np.rollaxis((data - data.min()) * 255.0 / (data.max() - data.min()), 0, 3).astype(np.uint8))
 
-    # Compute and save filters
-    if filters:
-        filter_data = np.zeros((1, ys[-1], xs[-1]), dtype=np.float32)
-        filter_data[0] = sobel(np.clip(data[0] / 600.0, 0, 1)) + sobel(np.clip(data[1] / 600.0, 0, 1)) + sobel(np.clip(data[2] / 600.0, 0, 1))
 
-        for i in xrange(n_location_images):
-            for j in xrange(n_location_images):
-                img = imgs[i][j]
-                ysz = img.shape[1]
-                xsz = img.shape[2]
+def compute_filters(data):
+    filter_data = np.zeros((1, data.shape[1], data.shape[2]), dtype=np.float32)
+    filter_data[0] = sobel(np.clip(data[0] / 600.0, 0, 1)) + sobel(np.clip(data[1] / 600.0, 0, 1)) + sobel(np.clip(data[2] / 600.0, 0, 1))
 
-                np.save('cache/images/%s_%d_%d_%sF.npy' % (loc, i, j, band), filter_data[:, ys[i]:ys[i]+ysz, xs[j]:xs[j]+xsz])
+    return filter_data
 
 
-print "Preparing image data..."
+def compute_indices(m):
+    eps = 1e-3
 
-# Prepare location
-for loc in locations:
+    blue = m[1].astype(np.float64)
+    green = m[2].astype(np.float64)
+    red = m[4].astype(np.float64)
+
+    nir1 = m[6].astype(np.float64)
+
+    indices_data = np.zeros((3, m.shape[1], m.shape[2]), dtype=np.float32)
+    indices_data[0] = (green - nir1) / (nir1 + green + eps)  # ndwi - nir1, green
+    indices_data[1] = (nir1 - red) / (nir1 + red + eps)  # ndvi - nir1, red
+    indices_data[2] = (nir1 - blue) / (nir1 + blue + eps)  # bai - nir1, blue
+
+    return indices_data
+
+
+def prepare_location(loc):
     print "  Processing %s..." % loc
 
-    imgs_i = read_location_images(loc, 'three_band')
-    imgs_m = read_location_images(loc, 'sixteen_band', 'M')
-    imgs_p = read_location_images(loc, 'sixteen_band', 'P')
+    data_i, xs_i, ys_i = read_location_images(loc, 'three_band')
+    data_m, xs_m, ys_m = read_location_images(loc, 'sixteen_band', 'M')
+    data_p, xs_p, ys_p = read_location_images(loc, 'sixteen_band', 'P')
 
     # Prepare images
     for i in xrange(n_location_images):
         for j in xrange(n_location_images):
-            save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), {'shape': imgs_i[i][j].shape, 'shape_m': imgs_m[i][j].shape, 'shape_p': imgs_p[i][j].shape})
+            meta = {
+                'shape': (0, ys_i[i+1] - ys_i[i], xs_i[j+1] - xs_i[j]),
+                'shape_i': (data_i.shape[0], ys_i[i+1] - ys_i[i], xs_i[j+1] - xs_i[j]),
+                'shape_m': (data_m.shape[0], ys_m[i+1] - ys_m[i], xs_m[j+1] - xs_m[j]),
+                'shape_p': (data_p.shape[0], ys_p[i+1] - ys_p[i], xs_p[j+1] - xs_p[j])
+            }
 
-    write_location_images(loc, imgs_i, 'I', filters=True)
-    write_location_images(loc, imgs_m, 'M')
-    write_location_images(loc, imgs_p, 'P')
+            save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), meta)
 
-    imgs_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
-    write_location_images(loc, imgs_a, 'A')
+    write_location_images(loc, data_i, xs_i, ys_i, 'I')
+    write_location_images(loc, data_m, xs_m, ys_m, 'M')
+    write_location_images(loc, data_p, xs_p, ys_p, 'P')
+
+    write_location_images(loc, compute_filters(data_i), xs_i, ys_i, 'IF')
+    write_location_images(loc, compute_indices(data_m), xs_m, ys_m, 'MI')
+
+    data_a, xs_a, ys_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
+
+    write_location_images(loc, data_a, xs_a, ys_a, 'A')
+
+
+print "Preparing image data..."
+
+# Prepare locations
+Parallel(n_jobs=-1)(delayed(prepare_location)(loc) for loc in locations)
 
 print "Done."

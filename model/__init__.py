@@ -21,6 +21,7 @@ band_size_factors = {
     'I': 1,
     'IF': 1,
     'M': 4,
+    'MI': 4,
     'A': 4
 }
 
@@ -28,6 +29,7 @@ band_n_channels = {
     'I': 3,
     'IF': 1,
     'M': 8,
+    'MI': 3,
     'A': 8
 }
 
@@ -68,23 +70,25 @@ def extract_patch(xx, x, k, oi, oj, patch_size, downscale):
 
 class Augmenter(object):
 
-    def __init__(self, channel_shift_range=0.0005, channel_scale_range=0.0001):
+    def __init__(self, channel_shift_range=0.0005, channel_scale_range=0.0001, mirror=True, rotate=True):
+        self.mirror = mirror
+        self.rotate = rotate
         self.channel_shift_range = channel_shift_range
         self.channel_scale_range = channel_scale_range
 
     def augment_batch(self, x_batches, y_batch):
         for i in xrange(y_batch.shape[0]):
-            if np.random.random() < 0.5:  # Mirror by x
+            if self.mirror and np.random.random() < 0.5:  # Mirror by x
                 for x_batch in x_batches.values():
                     x_batch[i] = x_batch[i, :, ::-1, :]
                 y_batch[i] = y_batch[i, :, ::-1, :]
 
-            if np.random.random() < 0.5:  # Mirror by y
+            if self.mirror and np.random.random() < 0.5:  # Mirror by y
                 for x_batch in x_batches.values():
                     x_batch[i] = x_batch[i, :, :, ::-1]
                 y_batch[i] = y_batch[i, :, :, ::-1]
 
-            if np.random.random() < 0.5:  # Rotate
+            if self.rotate and np.random.random() < 0.5:  # Rotate
                 for x_batch in x_batches.values():
                     x_batch[i] = np.swapaxes(x_batch[i], 1, 2)
                 y_batch[i] = np.swapaxes(y_batch[i], 1, 2)
@@ -187,7 +191,7 @@ class Normalizer(object):
 
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, n_epoch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), batch_mode='grid', batch_size=64, epoch_batches=100, augment={}):
+    def __init__(self, name, arch, n_epoch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), batch_mode='grid', batch_size=64, epoch_batches=100, augment={}, optimizer=None):
         self.name = name
         self.arch = arch
         self.n_epoch = n_epoch
@@ -210,6 +214,8 @@ class ModelPipeline(object):
 
         self.augmenter = Augmenter(**augment)
 
+        self.optimizer = optimizer
+
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
 
@@ -217,7 +223,10 @@ class ModelPipeline(object):
 
     def load(self):
         self.input_normalizers = load_pickle('cache/models/%s-norm.pickle' % self.name)
-        self.model.load_weights('cache/models/%s.hdf5' % self.name)
+        self.load_weights(self.name)
+
+    def load_weights(self, name):
+        self.model.load_weights('cache/models/%s.hdf5' % name)
 
     def fit(self, train_image_ids, val_image_ids=None, epoch_mult=1.0):
         print "Fitting normalizers..."
@@ -245,7 +254,9 @@ class ModelPipeline(object):
         def loss(y, p):
             return combined_loss(y, p, 100, class_priors[self.classes])
 
-        self.model.compile(optimizer=Adam(3e-3, decay=4e-4), loss=loss, metrics=[jaccard_coef, jaccard_coef_int])
+        optimizer = self.optimizer or Adam(3e-3, decay=4e-4)
+
+        self.model.compile(optimizer=optimizer, loss=loss, metrics=[jaccard_coef, jaccard_coef_int])
 
         self.model.fit_generator(
             generator,
