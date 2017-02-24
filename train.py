@@ -17,10 +17,12 @@ from model.presets import presets
 
 
 cls_opts = {
+    0: {'epsilon': 1.0},
+    1: {'epsilon': 0.1, 'min_area': 0.1},
 }
 
 cls_thr = {
-    1: 0.2
+    1: 0.3
 }
 
 
@@ -30,7 +32,7 @@ parser.add_argument('--no-train', action='store_true', help='skip model training
 parser.add_argument('--no-predict', action='store_true', help='skip model prediction')
 parser.add_argument('--no-val', action='store_true', help='skip validation pass')
 parser.add_argument('--no-full', action='store_true', help='skip full pass')
-parser.add_argument('--cont', action='store_true', help='load prev weights and continue optimization')
+parser.add_argument('--cont', type=int, help='load prev weights and continue optimization from given train stage')
 
 
 args = parser.parse_args()
@@ -38,19 +40,25 @@ args = parser.parse_args()
 preset_name = args.preset
 preset = presets[preset_name]
 
+preset_opts = dict((k, v) for k, v in preset.items() if k != 'train')
+preset_train_stages = preset['train'][args.cont or 0:]
+
 print "Using preset: %s" % preset_name
 
 # Validation pass
 if not args.no_val:
     print "Validation pass..."
 
-    pipeline = ModelPipeline('%s-val' % preset_name, **preset)
+    pipeline = ModelPipeline('%s-val' % preset_name, **preset_opts)
 
     if args.no_train or args.cont:
         pipeline.load()
 
     if not args.no_train:
-        pipeline.fit(val_train_image_ids, val_test_image_ids)
+        for train_preset in preset_train_stages:
+            print "Fitting with %s..." % str(train_preset)
+
+            pipeline.fit(val_train_image_ids, val_test_image_ids, **train_preset)
 
     if not args.no_predict:
 
@@ -102,18 +110,22 @@ if not args.no_val:
 if not args.no_full:
     print "Full pass..."
 
-    pipeline = ModelPipeline('%s-full' % preset_name, **preset)
+    pipeline = ModelPipeline('%s-full' % preset_name, **preset_opts)
 
     if args.no_train or args.cont:
         pipeline.load()
+    else:
+        pipeline.load_weights('%s-val' % preset_name)
 
     if not args.no_train:
-        if preset.get('batch_mode') == 'random':
-            epoch_mult = len(full_train_image_ids) * 1.0 / len(val_train_image_ids)
-        else:
-            epoch_mult = 1.0
+        for train_preset in preset_train_stages:
+            if preset.get('batch_mode') == 'random':
+                train_preset = train_preset.copy()
+                train_preset['n_epoch'] = int(train_preset['n_epoch'] * len(full_train_image_ids) / len(val_train_image_ids))
 
-        pipeline.fit(full_train_image_ids, epoch_mult=epoch_mult)
+            print "Fitting with %s..." % str(train_preset)
+
+            pipeline.fit(val_train_image_ids, val_test_image_ids, **train_preset)
 
     if not args.no_predict:
         subm = sample_submission.copy()

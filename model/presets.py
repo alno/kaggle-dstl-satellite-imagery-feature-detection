@@ -1,4 +1,4 @@
-from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi, unet_vgg16, unet_water, rnet3, unet4_mi, dnet1_mi, dnet2
+from .archs import unet, unet2, unet3, unet_mi, unet_mi_2, unet_ma, unet3_mi, rnet1, rnet1_mi, rnet2, rnet2_mi, unet2_mi, unet_vgg16, unet_water, rnet3, unet4_mi, dnet1_mi, dnet2, dnet3
 
 from keras.optimizers import Adam
 
@@ -484,44 +484,90 @@ presets = {
 
     'd1mi_str_2': {
         'arch': dnet1_mi,
-        'n_epoch': 70,
         'mask_patch_size': 160,
-        'batch_mode': 'random',
-        'batch_size': 32,
-        'epoch_batches': 100,
         'inputs': {
             'in_I': {'band': 'I'},
             'in_IF': {'band': 'IF'},
             'in_M': {'band': 'M'},
             'in_MI': {'band': 'MI'},
         },
-        'augment': {
-            'mirror': False,
-            'rotate': False
-        },
         'classes': [0, 1, 4],
-#        'optimizer': Adam(1e-2, decay=4e-4)
+        'train': [{
+            'n_epoch': 40,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': False,
+                'rotate': False
+            },
+            'optimizer': Adam(1e-4, decay=4e-4),
+        }]
     },
 
     'd2_1': {
         'arch': dnet2,
-        'n_epoch': 300,
         'mask_patch_size': 128,
         'mask_downscale': 4,
-        'batch_mode': 'random',
-        'batch_size': 32,
-        'epoch_batches': 100,
         'inputs': {
             'd0_I': {'band': 'I', 'downscale': 4},
             'd0_IF': {'band': 'IF', 'downscale': 4},
             'd0_M': {'band': 'M'},
             'd0_MI': {'band': 'MI'},
         },
-        'augment': {
-            'mirror': False,
-            'rotate': False
+        'classes': [0, 1, 2, 3, 4, 5, 6, 7],
+        'train': [{
+            'n_epoch': 300,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': False,
+                'rotate': False
+            },
+            'optimizer': Adam(1e-4, decay=2e-4),
+        }]
+    },
+
+    'd3_1': {
+        'arch': dnet3,
+        'mask_patch_size': 160,
+        'mask_downscale': 4,
+        'inputs': {
+            'd0_I': {'band': 'I', 'downscale': 4},
+            'd0_IF': {'band': 'IF', 'downscale': 4},
+            'd0_M': {'band': 'M'},
+            'd0_MI': {'band': 'MI'},
+            'd0_A': {'band': 'A'},
         },
         'classes': [0, 1, 2, 3, 4, 5, 6, 7],
-        'optimizer': Adam(1e-2, decay=2e-4)
+        'train': [{
+            'n_epoch': 10,
+            'epoch_batches': 100,
+            'batch_size': 16,
+            'augment': {
+                'mirror': True,
+                'rotate': True
+            },
+            'optimizer': Adam(1e-1, decay=2e-4),
+        }, {
+            'n_epoch': 100,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': True,
+                'rotate': True
+            },
+            'optimizer': Adam(1e-2, decay=2e-4),
+            'loss_jac_weight': 0.1,
+        }, {
+            'n_epoch': 300,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': True,
+                'rotate': True
+            },
+            'optimizer': Adam(1e-4, decay=2e-4),
+            'loss_jac_weight': 0.3,
+        }]
     },
 }

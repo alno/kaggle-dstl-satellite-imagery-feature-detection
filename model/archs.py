@@ -913,3 +913,87 @@ def dnet2(input_shapes, n_classes):
     out = Activation('sigmoid')(conv(n_classes, 1, u1))
 
     return Model(input=inputs.values(), output=out)
+
+
+def dnet3(input_shapes, n_classes):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    dropout = 0.2
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(k, n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(k, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(x):
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(32, 1, 1, init='he_normal')(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+        x = Dropout(dropout)(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Downpath
+    c1 = dense_block(16, 2, get_input('d0'), append=True)
+    d1 = down_block(c1)
+
+    c2 = dense_block(16, 3, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(c2)
+
+    c3 = dense_block(16, 4, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(c3)
+
+    c4 = dense_block(16, 5, concat_input(d3, 'd3'), append=True)
+    d4 = down_block(c4)
+
+    c5 = dense_block(16, 6, concat_input(d4, 'd4'), append=True)
+    d5 = down_block(c5)
+
+    # Bottleneck
+    mi = dense_block(16, 6, d5, append=True)
+
+    # Uppath
+    u5 = dense_block(16, 12, concat([c5, up_block(mi)]))
+    u4 = dense_block(16, 10, concat([c4, up_block(u5)]))
+    u3 = dense_block(16,  8, concat([c3, up_block(u4)]))
+    u2 = dense_block(16,  6, concat([c2, up_block(u3)]))
+    u1 = dense_block(16,  4, concat([c1, up_block(u2)]))
+
+    out = Convolution2D(n_classes, 1, 1, activation='sigmoid')(u1)
+
+    return Model(input=inputs.values(), output=out)
