@@ -130,7 +130,7 @@ if not args.no_full:
     if not args.no_predict:
         subm = sample_submission.copy()
 
-        for image_id in subm['ImageId'].unique():
+        for image_id in sorted(subm['ImageId'].unique()):
             start_time = time.time()
 
             sys.stdout.write("  Processing %s... " % image_id)
