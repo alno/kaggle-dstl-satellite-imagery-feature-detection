@@ -918,7 +918,7 @@ def dnet2(input_shapes, n_classes):
 def dnet3(input_shapes, n_classes):
     inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
 
-    dropout = 0.2
+    dropout = 0.15
 
     def concat(xs):
         if len(xs) == 1:
@@ -978,14 +978,14 @@ def dnet3(input_shapes, n_classes):
     c3 = dense_block(16, 4, concat_input(d2, 'd2'), append=True)
     d3 = down_block(c3)
 
-    c4 = dense_block(16, 5, concat_input(d3, 'd3'), append=True)
+    c4 = dense_block(16, 4, concat_input(d3, 'd3'), append=True)
     d4 = down_block(c4)
 
-    c5 = dense_block(16, 6, concat_input(d4, 'd4'), append=True)
+    c5 = dense_block(16, 4, concat_input(d4, 'd4'), append=True)
     d5 = down_block(c5)
 
     # Bottleneck
-    mi = dense_block(16, 6, d5, append=True)
+    mi = dense_block(16, 4, d5, append=True)
 
     # Uppath
     u5 = dense_block(16, 12, concat([c5, up_block(mi)]))

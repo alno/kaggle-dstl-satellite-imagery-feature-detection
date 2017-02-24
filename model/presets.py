@@ -155,7 +155,7 @@ presets = {
         },
         'augment': {
             'mirror': False,
-            'rotate': False
+            'transpose': False
         },
         'classes': [0, 1, 2, 3, 4, 5]
     },
@@ -456,7 +456,7 @@ presets = {
         },
         'augment': {
             'mirror': False,
-            'rotate': False
+            'transpose': False
         },
         'classes': [0, 1, 4]
     },
@@ -476,7 +476,7 @@ presets = {
         },
         'augment': {
             'mirror': False,
-            'rotate': False
+            'transpose': False
         },
         'classes': [0, 1, 4],
 #        'optimizer': Adam(1e-2, decay=4e-4)
@@ -498,7 +498,7 @@ presets = {
             'batch_size': 32,
             'augment': {
                 'mirror': False,
-                'rotate': False
+                'transpose': False
             },
             'optimizer': Adam(1e-4, decay=4e-4),
         }]
@@ -521,7 +521,7 @@ presets = {
             'batch_size': 32,
             'augment': {
                 'mirror': False,
-                'rotate': False
+                'transpose': False
             },
             'optimizer': Adam(1e-4, decay=2e-4),
         }]
@@ -529,42 +529,86 @@ presets = {
 
     'd3_1': {
         'arch': dnet3,
-        'mask_patch_size': 160,
+        'mask_patch_size': 128,
         'mask_downscale': 4,
         'inputs': {
             'd0_I': {'band': 'I', 'downscale': 4},
             'd0_IF': {'band': 'IF', 'downscale': 4},
             'd0_M': {'band': 'M'},
             'd0_MI': {'band': 'MI'},
-            'd0_A': {'band': 'A'},
         },
-        'classes': [0, 1, 2, 3, 4, 5, 6, 7],
+        'classes': [2, 3, 4, 5, 6, 7],
         'train': [{
             'n_epoch': 10,
             'epoch_batches': 100,
             'batch_size': 16,
             'augment': {
                 'mirror': True,
-                'rotate': True
+                'transpose': True,
             },
             'optimizer': Adam(1e-1, decay=2e-4),
+            'loss_jac_weight': 0.05,
         }, {
             'n_epoch': 100,
             'epoch_batches': 100,
             'batch_size': 32,
             'augment': {
                 'mirror': True,
-                'rotate': True
+                'transpose': True,
             },
             'optimizer': Adam(1e-2, decay=2e-4),
-            'loss_jac_weight': 0.1,
+            'loss_jac_weight': 0.15,
         }, {
             'n_epoch': 300,
             'epoch_batches': 100,
             'batch_size': 32,
             'augment': {
                 'mirror': True,
-                'rotate': True
+                'transpose': True,
+            },
+            'optimizer': Adam(1e-4, decay=2e-4),
+            'loss_jac_weight': 0.3,
+        }]
+    },
+
+    'd3_2': {
+        'arch': dnet3,
+        'mask_patch_size': 128,
+        'mask_downscale': 4,
+        'inputs': {
+            'd0_I': {'band': 'I', 'downscale': 4},
+            'd0_IF': {'band': 'IF', 'downscale': 4},
+            'd0_M': {'band': 'MN'},
+            'd0_MI': {'band': 'MI'},
+        },
+        'classes': [2, 3, 4, 5, 6, 7],
+        'train': [{
+            'n_epoch': 20,
+            'epoch_batches': 100,
+            'batch_size': 16,
+            'augment': {
+                'mirror': True,
+                'transpose': True,
+            },
+            'optimizer': Adam(1e-1, decay=2e-4),
+            'loss_jac_weight': 0.05,
+        }, {
+            'n_epoch': 100,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': True,
+                'transpose': True,
+            },
+            'optimizer': Adam(1e-2, decay=2e-4),
+            'loss_jac_weight': 0.15,
+        }, {
+            'n_epoch': 300,
+            'epoch_batches': 100,
+            'batch_size': 32,
+            'augment': {
+                'mirror': True,
+                'transpose': True,
             },
             'optimizer': Adam(1e-4, decay=2e-4),
             'loss_jac_weight': 0.3,

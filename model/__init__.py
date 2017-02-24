@@ -22,6 +22,7 @@ band_size_factors = {
     'I': 1,
     'IF': 1,
     'M': 4,
+    'MN': 4,
     'MI': 4,
     'A': 4
 }
@@ -30,6 +31,7 @@ band_n_channels = {
     'I': 3,
     'IF': 1,
     'M': 8,
+    'MN': 8,
     'MI': 3,
     'A': 8
 }
@@ -84,14 +86,26 @@ def extract_patch(xx, x, k, oi, oj, patch_size, downscale):
 
 class Augmenter(object):
 
-    def __init__(self, channel_shift_range=0.0005, channel_scale_range=0.0001, mirror=True, rotate=True):
+    def __init__(self, channel_shift_range=0.0005, channel_scale_range=0.0001, mirror=True, transpose=True, rotation=0, scale=0):
         self.mirror = mirror
-        self.rotate = rotate
+        self.transpose = transpose
+        self.rotation = rotation
+        self.scale = scale
         self.channel_shift_range = channel_shift_range
         self.channel_scale_range = channel_scale_range
 
     def augment_batch(self, x_batches, y_batch):
         for i in xrange(y_batch.shape[0]):
+            if self.rotation > 0 or self.scale > 0:
+                transform = self.gen_transform(y_batch.shape[3], y_batch.shape[2])
+
+                for x_batch in x_batches.values():
+                    for c in xrange(x_batch.shape[1]):
+                        x_batch[i, c] = cv2.warpAffine(x_batch[i, c], transform, dsize=(y_batch.shape[3], y_batch.shape[2]), flags=cv2.INTER_LINEAR)
+
+                for c in xrange(y_batch.shape[1]):
+                    y_batch[i, c] = cv2.warpAffine(y_batch[i, c], transform, dsize=(y_batch.shape[3], y_batch.shape[2]), flags=cv2.INTER_LINEAR)
+
             if self.mirror and np.random.random() < 0.5:  # Mirror by x
                 for x_batch in x_batches.values():
                     x_batch[i] = x_batch[i, :, ::-1, :]
@@ -102,7 +116,7 @@ class Augmenter(object):
                     x_batch[i] = x_batch[i, :, :, ::-1]
                 y_batch[i] = y_batch[i, :, :, ::-1]
 
-            if self.rotate and np.random.random() < 0.5:  # Rotate
+            if self.transpose and np.random.random() < 0.5:  # Transpose
                 for x_batch in x_batches.values():
                     x_batch[i] = np.swapaxes(x_batch[i], 1, 2)
                 y_batch[i] = np.swapaxes(y_batch[i], 1, 2)
@@ -115,6 +129,12 @@ class Augmenter(object):
                 for c in xrange(x_batch.shape[1]):
                     x_batch[i, c] *= np.random.uniform(1-self.channel_scale_range, 1+self.channel_scale_range)
                     x_batch[i, c] += np.random.uniform(-self.channel_shift_range, self.channel_shift_range)
+
+    def gen_transform(self, w, h):
+        theta = np.random.uniform(-self.rotation, self.rotation)
+        scale = np.random.uniform(-self.scale, self.scale) + 1
+
+        return cv2.getRotationMatrix2D((w/2, h/2), theta, scale)
 
 
 class Validator(Callback):
