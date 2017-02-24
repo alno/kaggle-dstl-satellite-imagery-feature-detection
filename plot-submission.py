@@ -4,23 +4,26 @@ import matplotlib.pyplot as plt
 
 import shapely.wkt
 import argparse
+import os
 
-from util.data import grid_sizes
+from util.data import grid_sizes, sample_submission
 from util.masks import convert_geo_coords_to_raster, poly_to_mask
 
 from matplotlib.patches import Polygon
 
+from tqdm import tqdm
+
 cls_colors = {
     0: 'red',
-    1: 'red',
+    1: 'purple',
     2: 'gray',
     3: 'gray',
     4: 'green',
     5: 'yellow',
     6: 'blue',
     7: 'cyan',
-    8: 'purple',
-    9: 'purple',
+    8: 'black',
+    9: 'black',
 }
 
 cls_alphas = {
@@ -48,11 +51,14 @@ def load_image(image_id):
     return img
 
 
-def plot_prediction_overlay(subm_name, image_id):
+def plot_prediction_overlay(subm_name, image_id, save_file=None):
     subm = pd.read_csv('subm/%s.csv.gz' % subm_name)
     img = load_image(image_id)
 
-    fig, ax = plt.subplots()
+    if save_file:
+        fig, ax = plt.subplots(figsize=(30, 30))
+    else:
+        fig, ax = plt.subplots()
 
     xmax = grid_sizes.loc[image_id, 'xmax']
     ymin = grid_sizes.loc[image_id, 'ymin']
@@ -63,12 +69,20 @@ def plot_prediction_overlay(subm_name, image_id):
     for cls in xrange(10):
         multi_poly = shapely.wkt.loads(subm.loc[(subm['ClassType'] == cls + 1) & (subm['ImageId'] == image_id), 'MultipolygonWKT'].values[0])
 
+        #if cls == 3:
+            #multi_poly = multi_poly.buffer(2e-5).buffer(-2e-5)
+
         for poly in multi_poly:
             coords = convert_geo_coords_to_raster(np.array(poly.exterior), img.shape[1:], (xmax, ymin))
             ax.add_patch(Polygon(coords, color=cls_colors[cls], lw=1.0, alpha=cls_alphas[cls]))
 
     plt.title(subm_name)
-    plt.show()
+
+    if save_file:
+        plt.savefig(save_file)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_predictions(subm_name, image_id):
@@ -109,12 +123,21 @@ parser = argparse.ArgumentParser(description='Plot submission')
 parser.add_argument('subm', type=str, help='submission name')
 parser.add_argument('--overlay', action='store_true', help='plot class overlay')
 parser.add_argument('--cls', type=int, help='class index')
-parser.add_argument('--image', type=str, default='6100_0_2', help='help image to plot')
+parser.add_argument('--image', type=str, help='help image to plot')
 
 args = parser.parse_args()
 
 if args.overlay:
-    plot_prediction_overlay(args.subm, args.image)
+    if args.image:
+        plot_prediction_overlay(args.subm, args.image)
+    else:
+        if not os.path.exists("debug/subms/%s" % args.subm):
+            os.mkdir("debug/subms/%s" % args.subm)
+
+        for image_id in tqdm(sorted(sample_submission['ImageId'].unique()), 'Processing'):
+            plot_prediction_overlay(args.subm, image_id, save_file="debug/subms/%s/%s.png" % (args.subm, image_id))
+
+
 elif args.cls is not None:
     plot_class_prediction(args.subm, args.image, args.cls)
 else:
