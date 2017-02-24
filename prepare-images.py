@@ -11,6 +11,17 @@ import cv2
 n_location_images = 5
 
 
+def normalize(src):
+    dst = np.empty(shape=src.shape, dtype=np.float32)
+
+    for c in xrange(src.shape[0]):
+        l, h = np.percentile(src[c], [1, 99])
+
+        dst[c] = (src[c].astype(np.float64) - l) / (h - l)
+
+    return dst
+
+
 def resize(src, shape):
     dst = np.empty(shape=(src.shape[0], shape[0], shape[1]))
 
@@ -122,6 +133,8 @@ def prepare_location(loc):
     write_location_images(loc, data_i, xs_i, ys_i, 'I')
     write_location_images(loc, data_m, xs_m, ys_m, 'M')
     write_location_images(loc, data_p, xs_p, ys_p, 'P')
+
+    write_location_images(loc, normalize(data_m), xs_m, ys_m, 'MN')  # Write location-normalized M channels
 
     write_location_images(loc, compute_filters(data_i), xs_i, ys_i, 'IF')
     write_location_images(loc, compute_indices(data_m), xs_m, ys_m, 'MI')
