@@ -18,7 +18,7 @@ from model.presets import presets
 
 cls_opts = {
     0: {'epsilon': 1.0},
-    1: {'epsilon': 0.1, 'min_area': 0.1},
+    1: {'epsilon': 0.5, 'min_area': 0.2},
 }
 
 cls_thr = {
@@ -56,6 +56,11 @@ if not args.no_val:
 
     if not args.no_train:
         for train_preset in preset_train_stages:
+            train_preset = train_preset.copy()
+
+            if 'val_only' in train_preset:
+                del train_preset['val_only']
+
             print "Fitting with %s..." % str(train_preset)
 
             pipeline.fit(val_train_image_ids, val_test_image_ids, **train_preset)
@@ -119,8 +124,12 @@ if not args.no_full:
 
     if not args.no_train:
         for train_preset in preset_train_stages:
+            train_preset = train_preset.copy()
+
+            if 'val_only' in train_preset:
+                continue
+
             if preset.get('batch_mode') == 'random':
-                train_preset = train_preset.copy()
                 train_preset['n_epoch'] = int(train_preset['n_epoch'] * len(full_train_image_ids) / len(val_train_image_ids))
 
             print "Fitting with %s..." % str(train_preset)

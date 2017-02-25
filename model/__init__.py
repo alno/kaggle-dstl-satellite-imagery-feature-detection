@@ -225,9 +225,8 @@ class Normalizer(object):
 
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes)):
+    def __init__(self, name, arch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), arch_options={}):
         self.name = name
-        self.arch = arch
 
         self.inputs = dict((key, Input(mask_patch_size * mask_downscale / band_size_factors[inp['band']] / inp.get('downscale', 1), **inp)) for key, inp in inputs.items())
         self.coarse_input = max(self.inputs.keys(), key=lambda inp: band_size_factors[self.inputs[inp].band])
@@ -243,7 +242,7 @@ class ModelPipeline(object):
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
 
-        self.model = self.arch(input_shapes=input_shapes, n_classes=self.n_classes)
+        self.model = arch(input_shapes=input_shapes, n_classes=self.n_classes, **arch_options)
 
     def load(self):
         self.input_normalizers = load_pickle('cache/models/%s-norm.pickle' % self.name)
@@ -274,7 +273,7 @@ class ModelPipeline(object):
         print "Training model with %d params..." % self.model.count_params()
 
         callbacks = [
-            ExponentialMovingAverage(filepath='cache/models/%s.hdf5' % self.name),
+            ExponentialMovingAverage(decay=0.995, filepath='cache/models/%s.hdf5' % self.name),
         ]
 
         if val_image_ids is not None:
