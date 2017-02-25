@@ -1,4 +1,4 @@
-from util.meta import locations
+from util.meta import locations, image_border
 from util import load_pickle, save_pickle
 
 from skimage.filters import sobel
@@ -27,6 +27,15 @@ def resize(src, shape):
 
     for c in xrange(src.shape[0]):
         dst[c] = cv2.resize(src[c], (shape[1], shape[0]), interpolation=cv2.INTER_CUBIC)
+
+    return dst
+
+
+def add_border(src):
+    dst = np.empty(shape=(src.shape[0], src.shape[1] + 2 * image_border, src.shape[2] + 2 * image_border))
+
+    for c in xrange(src.shape[0]):
+        dst[c] = cv2.copyMakeBorder(src[c], top=image_border, bottom=image_border, left=image_border, right=image_border, borderType=cv2.BORDER_REPLICATE)
 
     return dst
 
@@ -73,6 +82,9 @@ def read_location_images(loc, directory, band=None, resize_to=None):
         for j in xrange(n_location_images):
             data[:, ys[i]:ys[i+1], xs[j]:xs[j+1]] = imgs[i][j]
 
+    # Add border by replicating image data
+    data = add_border(data)
+
     return data, xs, ys
 
 
@@ -80,7 +92,7 @@ def write_location_images(loc, data, xs, ys, band, filters=False):
     # Save images
     for i in xrange(n_location_images):
         for j in xrange(n_location_images):
-            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, band), data[:, ys[i]:ys[i+1], xs[j]:xs[j+1]])
+            np.save('cache/images/%s_%d_%d_%s.npy' % (loc, i, j, band), data[:, ys[i]:ys[i+1] + 2 * image_border, xs[j]:xs[j+1] + 2 * image_border])
 
     # Save debug location map
     if False:
@@ -139,14 +151,14 @@ def prepare_location(loc):
     write_location_images(loc, compute_filters(data_i), xs_i, ys_i, 'IF')
     write_location_images(loc, compute_indices(data_m), xs_m, ys_m, 'MI')
 
-    data_a, xs_a, ys_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
+    #data_a, xs_a, ys_a = read_location_images(loc, 'sixteen_band', 'A', resize_to='shape_m')
 
-    write_location_images(loc, data_a, xs_a, ys_a, 'A')
+    #write_location_images(loc, data_a, xs_a, ys_a, 'A')
 
 
 print "Preparing image data..."
 
 # Prepare locations
-Parallel(n_jobs=-1)(delayed(prepare_location)(loc) for loc in locations)
+Parallel(n_jobs=2)(delayed(prepare_location)(loc) for loc in locations)
 
 print "Done."

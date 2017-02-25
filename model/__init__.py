@@ -3,7 +3,7 @@ import cv2
 
 from math import ceil
 
-from util.meta import n_classes
+from util.meta import n_classes, image_border
 from util import load_pickle, save_pickle
 
 from keras.callbacks import ModelCheckpoint, Callback
@@ -74,8 +74,8 @@ def upscale_mask(m, downscale):
 
 
 def extract_patch(xx, x, k, oi, oj, patch_size, downscale):
-    si = int(round(oi*(x.shape[1] - patch_size*downscale)))
-    sj = int(round(oj*(x.shape[2] - patch_size*downscale)))
+    si = int(round(oi*(x.shape[1] - 2*image_border - patch_size*downscale))) + image_border
+    sj = int(round(oj*(x.shape[2] - 2*image_border - patch_size*downscale))) + image_border
 
     if downscale == 1:
         xx[k] = x[:, si:si+patch_size, sj:sj+patch_size]
@@ -258,7 +258,7 @@ class ModelPipeline(object):
         augmenter = Augmenter(**augment)
 
         train_input_images = self.load_input_images(train_image_ids)
-        train_masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in train_image_ids]
+        train_masks = self.load_masks(train_image_ids)
 
         self.fit_and_apply_normalizers(train_input_images)
 
@@ -364,6 +364,16 @@ class ModelPipeline(object):
             input_images[input_name] = [np.load('cache/images/%s_%s.npy' % (image_id, inp.band)) for image_id in image_ids]
         return input_images
 
+    def load_masks(self, image_ids):
+        masks = []
+        for image_id in image_ids:
+            mask = np.load('cache/masks/%s.npy' % image_id)
+
+            masks.append(np.zeros((self.n_classes, mask.shape[1] + 2 * image_border, mask.shape[2] + 2 * image_border), dtype=mask.dtype))
+            masks[-1][:, image_border:mask.shape[1] + image_border, image_border:mask.shape[2] + image_border] = mask[self.classes]
+
+        return masks
+
     def write_batch_images(self, x_batches, y_batch, patches, image_ids, stage):
         for i, (img_idx, oi, oj) in enumerate(patches):
             if y_batch[0].sum() > 5 and np.random.random() < 0.01:
@@ -419,8 +429,6 @@ class ModelPipeline(object):
 
     def random_batch_generator(self, image_ids, input_images, masks, augmenter, batch_size):
         threshold = 0
-
-        masks = [np.load('cache/masks/%s.npy' % image_id)[self.classes] for image_id in image_ids]
 
         while True:
             x_batches = {}
