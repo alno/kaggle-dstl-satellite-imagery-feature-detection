@@ -16,14 +16,14 @@ from tqdm import tqdm
 cls_colors = {
     0: 'red',
     1: 'purple',
-    2: 'gray',
+    2: 'black',
     3: 'gray',
     4: 'green',
     5: 'yellow',
     6: 'blue',
     7: 'cyan',
-    8: 'black',
-    9: 'black',
+    8: 'white',
+    9: 'yellow',
 }
 
 cls_alphas = {
@@ -35,8 +35,8 @@ cls_alphas = {
     5: 0.15,
     6: 0.15,
     7: 0.15,
-    8: 0.3,
-    9: 0.3,
+    8: 0.4,
+    9: 0.4,
 }
 
 
