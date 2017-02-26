@@ -46,8 +46,8 @@ class_priors = np.array([
     0.5,
     0.1,
     0.05,
-    0.0001,
-    0.0001,
+    0.01,
+    0.01,
 ])
 
 class_smooths = np.array([
@@ -59,8 +59,8 @@ class_smooths = np.array([
     200,
     30,
     15,
-    3,
-    5,
+    10,
+    15,
 ])
 
 
@@ -81,7 +81,7 @@ def extract_patch(xx, x, k, oi, oj, patch_size, downscale):
         xx[k] = x[:, si:si+patch_size, sj:sj+patch_size]
     else:
         for c in xrange(xx.shape[1]):
-            xx[k, c] = cv2.resize(x[c, si:si+patch_size*downscale, sj:sj+patch_size*downscale].astype(np.float32), (patch_size, patch_size), interpolation=cv2.INTER_LINEAR)
+            xx[k, c] = cv2.resize(x[c, si:si+patch_size*downscale, sj:sj+patch_size*downscale].astype(np.float32), (patch_size, patch_size), interpolation=cv2.INTER_AREA)
 
 
 class Augmenter(object):
@@ -97,14 +97,20 @@ class Augmenter(object):
     def augment_batch(self, x_batches, y_batch):
         for i in xrange(y_batch.shape[0]):
             if self.rotation > 0 or self.scale > 0:
-                transform = self.gen_transform(y_batch.shape[3], y_batch.shape[2])
+                theta = np.random.uniform(-self.rotation, self.rotation)
+                scale = np.random.uniform(-self.scale, self.scale) + 1
 
                 for x_batch in x_batches.values():
-                    for c in xrange(x_batch.shape[1]):
-                        x_batch[i, c] = cv2.warpAffine(x_batch[i, c], transform, dsize=(y_batch.shape[3], y_batch.shape[2]), flags=cv2.INTER_LINEAR)
+                    w, h = x_batch.shape[3], x_batch.shape[2]
+                    transform = cv2.getRotationMatrix2D((w/2, h/2), theta, scale)
 
+                    for c in xrange(x_batch.shape[1]):
+                        x_batch[i, c] = cv2.warpAffine(x_batch[i, c], transform, dsize=(w, h), flags=cv2.INTER_LINEAR)
+
+                w, h = y_batch.shape[3], y_batch.shape[2]
+                transform = cv2.getRotationMatrix2D((w/2, h/2), theta, scale)
                 for c in xrange(y_batch.shape[1]):
-                    y_batch[i, c] = cv2.warpAffine(y_batch[i, c], transform, dsize=(y_batch.shape[3], y_batch.shape[2]), flags=cv2.INTER_LINEAR)
+                    y_batch[i, c] = cv2.warpAffine(y_batch[i, c], transform, dsize=(w, h), flags=cv2.INTER_LINEAR)
 
             if self.mirror and np.random.random() < 0.5:  # Mirror by x
                 for x_batch in x_batches.values():
@@ -127,14 +133,11 @@ class Augmenter(object):
                     continue
 
                 for c in xrange(x_batch.shape[1]):
-                    x_batch[i, c] *= np.random.uniform(1-self.channel_scale_range, 1+self.channel_scale_range)
-                    x_batch[i, c] += np.random.uniform(-self.channel_shift_range, self.channel_shift_range)
+                    if self.channel_scale_range > 0:
+                        x_batch[i, c] *= np.random.uniform(1-self.channel_scale_range, 1+self.channel_scale_range)
 
-    def gen_transform(self, w, h):
-        theta = np.random.uniform(-self.rotation, self.rotation)
-        scale = np.random.uniform(-self.scale, self.scale) + 1
-
-        return cv2.getRotationMatrix2D((w/2, h/2), theta, scale)
+                    if self.channel_shift_range > 0:
+                        x_batch[i, c] += np.random.uniform(-self.channel_shift_range, self.channel_shift_range)
 
 
 class Validator(Callback):
@@ -152,15 +155,15 @@ class Validator(Callback):
         print "  Validating epoch %d.." % (epoch+1)
 
         class_intersections = np.zeros(n_classes, dtype=np.float64)
-        class_unions = np.zeros(n_classes, dtype=np.float64) + 1e-7
+        class_unions = np.zeros(n_classes, dtype=np.float64) + 1e-5
 
         class_intersections_int = np.zeros(n_classes, dtype=np.float64)
-        class_unions_int = np.zeros(n_classes, dtype=np.float64) + 1e-7
+        class_unions_int = np.zeros(n_classes, dtype=np.float64) + 1e-5
 
         for image_id in self.image_ids:
-            mask = self.image_masks[image_id]
+            mask = self.image_masks[image_id].astype(np.float64)
 
-            pred = self.pipeline.predict(image_id)
+            pred = self.pipeline.predict(image_id).astype(np.float64)
             pred_int = pred > 0.5
 
             np.save('cache/preds/%s_%s.npy' % (image_id, self.pipeline.name), pred)
@@ -223,9 +226,32 @@ class Normalizer(object):
         return res
 
 
+class MeanStdNormalizer(object):
+
+    def fit(self, images):
+        self.means = np.empty(images[0].shape[0])
+        self.stds = np.empty(images[0].shape[0])
+
+        for c in xrange(images[0].shape[0]):
+            vals = np.hstack(img[c].flatten() for img in images)
+
+            self.means[c] = vals.mean()
+            self.stds[c] = vals.std()
+
+        return self
+
+    def transform(self, img):
+        res = np.empty(img.shape, dtype=np.float32)
+
+        for c in xrange(img.shape[0]):
+            res[c] = (img[c] - self.means[c]) / self.stds[c]
+
+        return res
+
+
 class ModelPipeline(object):
 
-    def __init__(self, name, arch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), arch_options={}):
+    def __init__(self, name, arch, mask_patch_size, inputs, mask_downscale=1, classes=range(n_classes), arch_options={}, normalization='minmax'):
         self.name = name
 
         self.inputs = dict((key, Input(mask_patch_size * mask_downscale / band_size_factors[inp['band']] / inp.get('downscale', 1), **inp)) for key, inp in inputs.items())
@@ -234,10 +260,12 @@ class ModelPipeline(object):
         self.mask_patch_size = mask_patch_size
         self.mask_downscale = mask_downscale
 
-        self.n_patches = int(ceil(3400.0 / self.mask_patch_size / self.mask_downscale))
+        self.n_patches = int(ceil(3400.0 / (self.mask_patch_size - 16) / self.mask_downscale))
 
         self.classes = classes
         self.n_classes = len(classes)
+
+        self.normalization = normalization
 
         # Initialize model
         input_shapes = dict((k, (i.n_channels, i.patch_size, i.patch_size)) for k, i in self.inputs.items())
@@ -251,7 +279,7 @@ class ModelPipeline(object):
     def load_weights(self, name):
         self.model.load_weights('cache/models/%s.hdf5' % name)
 
-    def fit(self, train_image_ids, val_image_ids=None, n_epoch=100, epoch_batches='grid', batch_size=64, augment={}, optimizer=None, loss_jac_weight=0.1):
+    def fit(self, train_image_ids, val_image_ids=None, n_epoch=100, epoch_batches='grid', batch_size=64, augment={}, optimizer=None, loss_jac_weight=0.1, batch_class_threshold=0, class_weights=1.0, ema=True, batch_noclass_accept_proba=0, batch_noclass_accept_proba_growth=0):
         print "Fitting normalizers..."
 
         augmenter = Augmenter(**augment)
@@ -267,25 +295,31 @@ class ModelPipeline(object):
             generator = self.grid_batch_generator(train_image_ids, train_input_images, train_masks, augmenter=augmenter, batch_size=batch_size)
             n_samples = len(train_image_ids) * self.n_patches * self.n_patches
         else:
-            generator = self.random_batch_generator(train_image_ids, train_input_images, train_masks, augmenter=augmenter, batch_size=batch_size)
+            generator = self.random_batch_generator(train_image_ids, train_input_images, train_masks, augmenter=augmenter, batch_size=batch_size, batch_class_threshold=batch_class_threshold, batch_noclass_accept_proba=batch_noclass_accept_proba, batch_noclass_accept_proba_growth=batch_noclass_accept_proba_growth)
             n_samples = epoch_batches * batch_size
 
         print "Training model with %d params..." % self.model.count_params()
 
         callbacks = [
-            ExponentialMovingAverage(decay=0.995, filepath='cache/models/%s.hdf5' % self.name),
+            ExponentialMovingAverage(decay=0.995, filepath='cache/models/%s.hdf5' % self.name) if ema else ModelCheckpoint('cache/models/%s.hdf5' % self.name, monitor='loss', save_best_only=False, save_weights_only=True),
         ]
 
         if val_image_ids is not None:
             callbacks.append(Validator(self, val_image_ids))
 
         def loss(y, p):
-            return combined_loss(y, p, class_smooths[self.classes], class_priors[self.classes], jac_weight=loss_jac_weight)
+            return combined_loss(y, p, class_smooths[self.classes], class_priors[self.classes], jac_weight=loss_jac_weight, class_weights=class_weights)
+
+        def jac(y, p):
+            return jaccard_coef(y, p, class_weights=class_weights)
+
+        def jac_int(y, p):
+            return jaccard_coef_int(y, p, class_weights=class_weights)
 
         if optimizer is None:
             optimizer = Adam(3e-3, decay=4e-4)
 
-        self.model.compile(optimizer=optimizer, loss=loss, metrics=[jaccard_coef, jaccard_coef_int])
+        self.model.compile(optimizer=optimizer, loss=loss, metrics=[jac, jac_int])
 
         self.model.fit_generator(
             generator,
@@ -297,7 +331,14 @@ class ModelPipeline(object):
     def fit_and_apply_normalizers(self, input_images):
         self.input_normalizers = {}
         for input_name, images in input_images.items():
-            self.input_normalizers[input_name] = Normalizer().fit(images)
+            if self.normalization == 'minmax':
+                norm = Normalizer()
+            elif self.normalization == 'std':
+                norm = MeanStdNormalizer()
+            else:
+                raise ValueError("Unknown normalization: %s" % self.normalization)
+
+            self.input_normalizers[input_name] = norm.fit(images)
 
             for i in xrange(len(images)):
                 images[i] = self.input_normalizers[input_name].transform(images[i])
@@ -426,9 +467,7 @@ class ModelPipeline(object):
 
                 batch_start += batch_size
 
-    def random_batch_generator(self, image_ids, input_images, masks, augmenter, batch_size):
-        threshold = 0
-
+    def random_batch_generator(self, image_ids, input_images, masks, augmenter, batch_size, batch_class_threshold, batch_noclass_accept_proba, batch_noclass_accept_proba_growth):
         while True:
             x_batches = {}
             for input_name, inp in self.inputs.items():
@@ -450,7 +489,8 @@ class ModelPipeline(object):
 
                 extract_patch(y_batch, masks[img_idx], k, oi, oj, self.mask_patch_size, self.mask_downscale)
 
-                if y_batch[k].sum() < threshold:
+                # Skip image if it doesn't pass threshold and random acceptance
+                if all(y_batch[k].sum(axis=(1, 2)) < batch_class_threshold) and np.random.rand() > batch_noclass_accept_proba:
                     continue
 
                 for input_name, inp in self.inputs.items():
@@ -467,3 +507,5 @@ class ModelPipeline(object):
                 self.write_batch_images(x_batches, y_batch, patches, image_ids, 'train')
 
             yield x_batches, y_batch
+
+            batch_noclass_accept_proba += batch_noclass_accept_proba_growth
