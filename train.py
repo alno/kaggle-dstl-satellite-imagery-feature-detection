@@ -19,10 +19,14 @@ from model.presets import presets
 cls_opts = {
     0: {'epsilon': 1.0},
     1: {'epsilon': 0.5, 'min_area': 0.2},
+    8: {'epsilon': 0.2, 'min_area': 0.2},
+    9: {'epsilon': 0.2, 'min_area': 0.2},
 }
 
 cls_thr = {
-    1: 0.3
+    1: 0.3,
+    8: 0.3,
+    9: 0.3
 }
 
 
@@ -134,7 +138,7 @@ if not args.no_full:
 
             print "Fitting with %s..." % str(train_preset)
 
-            pipeline.fit(val_train_image_ids, val_test_image_ids, **train_preset)
+            pipeline.fit(full_train_image_ids, **train_preset)
 
     if not args.no_predict:
         subm = sample_submission.copy()
