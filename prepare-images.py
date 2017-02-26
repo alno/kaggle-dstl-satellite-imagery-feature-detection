@@ -128,7 +128,7 @@ def prepare_location(loc):
 
     data_i, xs_i, ys_i = read_location_images(loc, 'three_band')
     data_m, xs_m, ys_m = read_location_images(loc, 'sixteen_band', 'M')
-    data_p, xs_p, ys_p = read_location_images(loc, 'sixteen_band', 'P')
+    #data_p, xs_p, ys_p = read_location_images(loc, 'sixteen_band', 'P')
 
     # Prepare images
     for i in xrange(n_location_images):
@@ -137,14 +137,14 @@ def prepare_location(loc):
                 'shape': (0, ys_i[i+1] - ys_i[i], xs_i[j+1] - xs_i[j]),
                 'shape_i': (data_i.shape[0], ys_i[i+1] - ys_i[i], xs_i[j+1] - xs_i[j]),
                 'shape_m': (data_m.shape[0], ys_m[i+1] - ys_m[i], xs_m[j+1] - xs_m[j]),
-                'shape_p': (data_p.shape[0], ys_p[i+1] - ys_p[i], xs_p[j+1] - xs_p[j])
+                #'shape_p': (data_p.shape[0], ys_p[i+1] - ys_p[i], xs_p[j+1] - xs_p[j])
             }
 
             save_pickle('cache/meta/%s_%d_%d.pickle' % (loc, i, j), meta)
 
     write_location_images(loc, data_i, xs_i, ys_i, 'I')
     write_location_images(loc, data_m, xs_m, ys_m, 'M')
-    write_location_images(loc, data_p, xs_p, ys_p, 'P')
+    #write_location_images(loc, data_p, xs_p, ys_p, 'P')
 
     write_location_images(loc, normalize(data_m), xs_m, ys_m, 'MN')  # Write location-normalized M channels
 
