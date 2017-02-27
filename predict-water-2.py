@@ -10,7 +10,8 @@ from util.data import grid_sizes, sample_submission, train_wkt
 from util.masks import mask_to_poly, poly_to_mask
 from util.meta import n_classes, full_train_image_ids, class_names
 
-from skimage.morphology import disk, binary_dilation
+
+min_water_area = 0.03
 
 
 def predict_mask(image_id):
@@ -24,13 +25,13 @@ def predict_mask(image_id):
 
     msk = (ccci > 0.11).astype(np.uint8)
 
-    if msk.sum() < 0.04 * np.product(msk.shape):
+    if msk.sum() < min_water_area * np.product(msk.shape):
         msk[:, :] = 0
 
     return msk[np.newaxis, :, :]
 
 
-cls_opts = {}
+cls_opts = {'min_area': 100, 'threshold': 0.5}
 classes = [6]
 
 
@@ -64,10 +65,18 @@ if True:
             pixel_intersections[cls] += cls_pixel_inter
             pixel_unions[cls] += cls_pixel_union
 
-            pred_poly = mask_to_poly(pred_mask, xymax, **cls_opts.get(cls, {}))
+            pred_poly = mask_to_poly(pred_mask, xymax, **cls_opts)
 
-            poly_intersections[cls] += pred_poly.intersection(true_poly).area
-            poly_unions[cls] += pred_poly.union(true_poly).area
+            if pred_poly.area < min_water_area * abs(np.product(xymax)):
+                pred_poly = mask_to_poly(pred_mask * 0, xymax, **cls_opts)
+
+            cls_poly_inter = pred_poly.intersection(true_poly).area
+            cls_poly_union = pred_poly.union(true_poly).area
+
+            poly_intersections[cls] += cls_poly_inter
+            poly_unions[cls] += cls_poly_union
+
+            print "%s: %.8f vs %.8f" % (image_id, pred_poly.area, true_poly.area)
 
         print "Done in %d seconds" % (time.time() - start_time)
 
@@ -87,7 +96,7 @@ if True:
 
     subm = sample_submission.copy()
 
-    for image_id in subm['ImageId'].unique():
+    for image_id in sorted(subm['ImageId'].unique()):
         start_time = time.time()
 
         sys.stdout.write("  Processing %s... " % image_id)
@@ -101,7 +110,10 @@ if True:
                 ci = classes.index(cls-1)
 
                 pred_mask = pred[ci]
-                pred_poly = mask_to_poly(pred_mask, xymax, **cls_opts.get(cls-1, {}))
+                pred_poly = mask_to_poly(pred_mask, xymax, **cls_opts)
+
+                if pred_poly.area < min_water_area * abs(np.product(xymax)):
+                    pred_poly = mask_to_poly(pred_mask * 0, xymax, **cls_opts)
 
                 subm.loc[(subm['ImageId'] == image_id) & (subm['ClassType'] == cls), 'MultipolygonWKT'] = shapely.wkt.dumps(pred_poly, rounding_precision=8)
             else:
