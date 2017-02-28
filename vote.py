@@ -13,6 +13,12 @@ subm_names = [
     'subm-d8m-20170228-0537'
 ]
 
+subm_names = [
+    'unet-fullaug-all-dice-10-cls-2-3-cls-2',
+    'unet-fullaug-dice-10-cls-2-3.csv-model-64-cls-2',
+    'unet-fullaug-square-dice-10-bn-eps-2-cls-2'
+]
+
 classes = [3]
 
 min_total_area = 1e-8
@@ -26,7 +32,7 @@ subm = sample_submission.copy()
 for image_id in sorted(subm['ImageId'].unique()):
     print "%s..." % image_id
 
-    subm.loc[subm['ImageId'] == image_id, 'MultipolygonWKT'] = 'GEOMETRYCOLLECTION EMPTY'
+    subm.loc[subm['ImageId'] == image_id, 'MultipolygonWKT'] = 'MULTIPOLYGON EMPTY'
 
     for cls in classes:
         polys = [shapely.wkt.loads(s.loc[(s['ImageId'] == image_id) & (s['ClassType'] == cls), 'MultipolygonWKT'].iloc[0]) for s in subms]
@@ -37,7 +43,7 @@ for image_id in sorted(subm['ImageId'].unique()):
             for j in xrange(i+1, len(polys)):
                 poly_parts.append(polys[i].intersection(polys[j]))
 
-        res = unary_union(poly_parts)
+        res = unary_union(poly_parts).buffer(0)
 
         if res.area < min_total_area:
             continue
