@@ -44,7 +44,7 @@ args = parser.parse_args()
 preset_name = args.preset
 preset = presets[preset_name]
 
-preset_opts = dict((k, v) for k, v in preset.items() if k != 'train')
+preset_opts = dict((k, v) for k, v in preset.items() if k not in ['train', 'init'])
 preset_train_stages = preset['train'][args.cont or 0:]
 
 print "Using preset: %s" % preset_name
@@ -57,6 +57,8 @@ if not args.no_val:
 
     if args.no_train or args.cont:
         pipeline.load()
+    elif 'init' in preset:
+        pipeline.load_weights('%s-val' % preset['init'])
 
     if not args.no_train:
         for train_preset in preset_train_stages:
@@ -91,8 +93,10 @@ if not args.no_val:
 
             for cls in xrange(n_classes):
                 cls_pred = pred[cls] > cls_thr.get(cls, 0.5)
-                cls_pixel_inter = (cls_pred & mask[cls]).sum()
-                cls_pixel_union = (cls_pred | mask[cls]).sum()
+                cls_mask = mask[cls] >= 0.5
+
+                cls_pixel_inter = (cls_pred & cls_mask).sum()
+                cls_pixel_union = (cls_pred | cls_mask).sum()
 
                 pixel_intersections[cls] += cls_pixel_inter
                 pixel_unions[cls] += cls_pixel_union
@@ -123,6 +127,8 @@ if not args.no_full:
 
     if args.no_train or args.cont:
         pipeline.load()
+    elif 'init' in preset:
+        pipeline.load_weights('%s-full' % preset['init'])
     else:
         pipeline.load_weights('%s-val' % preset_name)
 
@@ -133,7 +139,7 @@ if not args.no_full:
             if 'val_only' in train_preset:
                 continue
 
-            if preset.get('batch_mode') == 'random':
+            if train_preset.get('epoch_batches', 'grid') != 'grid':
                 train_preset['n_epoch'] = int(train_preset['n_epoch'] * len(full_train_image_ids) / len(val_train_image_ids))
 
             print "Fitting with %s..." % str(train_preset)
