@@ -1,9 +1,11 @@
 
 from keras.models import Model
-from keras.layers import Input, merge, Convolution2D, MaxPooling2D, AveragePooling2D, UpSampling2D, Activation, Dropout, BatchNormalization, AtrousConvolution2D, Lambda
+from keras.layers import Input, merge, Convolution2D, MaxPooling2D, AveragePooling2D, UpSampling2D, Activation, Dropout, BatchNormalization, AtrousConvolution2D, Lambda, Reshape, Permute
 from keras.layers.advanced_activations import ELU, LeakyReLU, PReLU
 from keras.regularizers import l2
 from keras.applications import VGG16
+
+from keras import backend as K
 
 
 def unet(input_shapes, n_classes):
@@ -838,10 +840,8 @@ def dnet1_mi(input_shapes, n_classes):
     return Model(input=inputs.values(), output=out)
 
 
-def dnet2(input_shapes, n_classes):
+def dnet2(input_shapes, n_classes, dropout=0.1):
     inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
-
-    dropout = 0.1
 
     def concat(xs):
         if len(xs) == 1:
@@ -995,5 +995,666 @@ def dnet3(input_shapes, n_classes):
     u1 = dense_block(16,  4, concat([c1, up_block(u2)]))
 
     out = Convolution2D(n_classes, 1, 1, activation='sigmoid')(u1)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def dnet4(input_shapes, n_classes, dropout=0.1, softmax=False):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    mask_shape = [shape for name, shape in input_shapes.items() if name.startswith('d0_')][0]
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(k, n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(k, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = LeakyReLU(0.2)(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(n, x):
+        x = Convolution2D(n, 1, 1, init='he_normal')(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = LeakyReLU(0.2)(x)
+        x = Dropout(dropout)(x)
+
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(32, 1, 1, init='he_normal')(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = LeakyReLU(0.2)(x)
+        x = Dropout(dropout)(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Downpath
+    c1 = dense_block(16, 2, get_input('d0'), append=True)
+    d1 = down_block(64, c1)
+
+    c2 = dense_block(16, 3, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(128, c2)
+
+    c3 = dense_block(16, 4, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(160, c3)
+
+    c4 = dense_block(16, 5, concat_input(d3, 'd3'), append=True)
+    d4 = down_block(256, c4)
+
+    # Bottleneck
+    mi = dense_block(16, 4, d4, append=True)
+
+    # Uppath
+    u4 = dense_block(16, 10, concat([c4, up_block(mi)]))
+    u3 = dense_block(16,  8, concat([c3, up_block(u4)]))
+    u2 = dense_block(16,  6, concat([c2, up_block(u3)]))
+    u1 = dense_block(16,  4, concat([c1, up_block(u2)]))
+
+    if softmax:
+        out = Convolution2D(n_classes + 1, 1, 1)(u1)
+        out = Reshape((n_classes + 1, mask_shape[1] * mask_shape[2]))(out)
+        out = Permute((2, 1))(out)
+
+        out = Activation('softmax')(out)
+
+        out = Lambda(lambda x: x[:, :, :n_classes], output_shape=(n_classes, mask_shape[1] * mask_shape[2]))(out)
+        out = Permute((2, 1))(out)
+        out = Reshape((n_classes, mask_shape[1], mask_shape[2]))(out)
+    else:
+        out = Convolution2D(n_classes, 1, 1, activation='sigmoid')(u1)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def rnet4(input_shapes, n_classes, output_bus_size=32, input_bus_size=32, block_size=16):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(n, inp):
+        outputs = []
+
+        for i in xrange(n):
+            x = Convolution2D(block_size, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = BatchNormalization(axis=1, mode=0)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def unet_block(sizes, inp):
+        x = inp
+
+        skips = []
+
+        for sz in sizes[:-1]:
+            x = dense_block(sz, x)
+            skips.append(x)
+            x = MaxPooling2D((2, 2))(x)
+
+        x = dense_block(sizes[-1], x)
+
+        for sz in reversed(sizes[:-1]):
+            x = concat([UpSampling2D((2, 2))(x), skips.pop()])
+            x = dense_block(sz, x)
+
+        return Convolution2D(output_bus_size, 1, 1, init='he_normal')(x)
+
+    def radd(out, inp, block, scale=0.5):
+        block_in = merge([inp, out], mode='concat', concat_axis=1)
+        block_out = block(block_in)
+        block_out = Lambda(lambda x: x * scale, output_shape=lambda x: x)(block_out)
+
+        return merge([block_out, out], mode='sum')
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(input_bus_size, 1, 1, init='he_normal')(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Build piramid of inputs
+    inp0 = get_input('d0')
+    inp1 = concat_input(AveragePooling2D((2, 2))(inp0), 'd1')
+    inp2 = concat_input(AveragePooling2D((2, 2))(inp1), 'd2')
+    inp3 = concat_input(AveragePooling2D((2, 2))(inp2), 'd3')
+
+    # Build outputs in resnet fashion
+    out3 = unet_block([2, 3], inp3)
+    out3 = radd(out3, inp3, lambda x: unet_block([2, 3, 4], x))
+
+    out2 = UpSampling2D((2, 2))(out3)
+    out2 = radd(out2, inp2, lambda x: unet_block([2, 3], x))
+    out2 = radd(out2, inp2, lambda x: unet_block([2, 3, 4], x))
+
+    out1 = UpSampling2D((2, 2))(out2)
+    out1 = radd(out1, inp1, lambda x: unet_block([2, 3], x))
+    out1 = radd(out1, inp1, lambda x: unet_block([2, 3, 4], x))
+
+    out0 = UpSampling2D((2, 2))(out1)
+    out0 = radd(out0, inp0, lambda x: unet_block([2, 3], x))
+    out0 = radd(out0, inp0, lambda x: unet_block([2, 3, 4], x))
+
+    # Final convolution
+    out = Convolution2D(n_classes, 1, 1, border_mode='same', activation='sigmoid')(out0)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def dnet5(input_shapes, n_classes, dropout=0.1):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(k, n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(k, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(n, x):
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(32, 1, 1, init='he_normal')(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = Dropout(dropout)(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Downpath
+    c1 = dense_block(16, 4, get_input('d0'), append=True)
+    d1 = down_block(c1)
+
+    c2 = dense_block(16, 4, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(c2)
+
+    c3 = dense_block(16, 4, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(c3)
+
+    c4 = dense_block(16, 4, concat_input(d3, 'd3'), append=True)
+    d4 = down_block(c4)
+
+    c5 = dense_block(16, 4, concat_input(d4, 'd4'), append=True)
+    d5 = down_block(c4)
+
+    # Bottleneck
+    mi = dense_block(16, 4, d5, append=True)
+
+    # Uppath
+    u5 = dense_block(16, 10, concat([c5, up_block(mi)]))
+    u4 = dense_block(16,  8, concat([c4, up_block(u5)]))
+    u3 = dense_block(16,  6, concat([c3, up_block(u4)]))
+    u2 = dense_block(16,  4, concat([c2, up_block(u3)]))
+
+    out = Convolution2D(n_classes, 1, 1, activation='sigmoid')(u2)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def rnet5(input_shapes, n_classes, output_bus_size=32, input_bus_size=32, block_size=32):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(n, inp):
+        outputs = []
+
+        for i in xrange(n):
+            x = Convolution2D(block_size, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = BatchNormalization(axis=1, mode=0)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def unet_block(sizes, inp):
+        x = inp
+
+        skips = []
+
+        for sz in sizes[:-1]:
+            x = dense_block(sz, x)
+            skips.append(x)
+            x = MaxPooling2D((2, 2))(x)
+
+        x = dense_block(sizes[-1], x)
+
+        for sz in reversed(sizes[:-1]):
+            x = concat([UpSampling2D((2, 2))(x), skips.pop()])
+            x = dense_block(sz, x)
+
+        return Convolution2D(output_bus_size, 1, 1, init='he_normal')(x)
+
+    def radd(out, inp, block, scale=0.5):
+        block_in = merge([inp, out], mode='concat', concat_axis=1)
+        block_out = block(block_in)
+        block_out = Lambda(lambda x: x * scale, output_shape=lambda x: x)(block_out)
+
+        return merge([block_out, out], mode='sum')
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(input_bus_size, 1, 1, init='he_normal')(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Build piramid of inputs
+    inp0 = get_input('d0')
+    inp1 = concat_input(AveragePooling2D((2, 2))(inp0), 'd1')
+    inp2 = concat_input(AveragePooling2D((2, 2))(inp1), 'd2')
+
+    # Build outputs in resnet fashion
+    out2 = unet_block([1, 2], inp2)
+    out2 = radd(out2, inp2, lambda x: unet_block([1, 2], x))
+
+    out1 = UpSampling2D((2, 2))(out2)
+    out1 = radd(out1, inp1, lambda x: unet_block([1, 2], x))
+    out1 = radd(out1, inp1, lambda x: unet_block([1, 2, 2], x))
+
+    out0 = UpSampling2D((2, 2))(out1)
+    out0 = radd(out0, inp0, lambda x: unet_block([1, 2], x))
+    out0 = radd(out0, inp0, lambda x: unet_block([1, 2, 2], x))
+
+    # Final convolution
+    out = Convolution2D(n_classes, 1, 1, border_mode='same', activation='sigmoid')(out0)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def rnet2n(input_shapes, n_classes, dropout=0.1):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def conv(size, x):
+        x = Convolution2D(size, 3, 3, border_mode='same', init='he_normal', bias=False)(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+        return x
+
+    def unet_block(sizes, inp):
+        x = inp
+
+        skips = []
+
+        for sz in sizes[:-1]:
+            x = conv(sz, x)
+            skips.append(x)
+            x = MaxPooling2D((2, 2))(x)
+
+        x = conv(sizes[-1], x)
+
+        for sz in reversed(sizes[:-1]):
+            x = conv(sz, merge([UpSampling2D((2, 2))(x), skips.pop()], mode='concat', concat_axis=1))
+
+        return x
+
+    def radd(out, inp, block, scale=0.5):
+        block_in = merge([inp, out], mode='concat', concat_axis=1)
+        block_out = block(block_in)
+        block_out = Dropout(dropout)(block_out)
+        block_out = Lambda(lambda x: x * scale, output_shape=lambda x: x)(block_out)
+
+        return merge([block_out, out], mode='sum')
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        return concat(inps)
+
+    def concat_input(x, prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return x
+
+        return concat([x] + inps)
+
+    # Build piramid of inputs
+    inp0 = get_input('d0')
+    inp1 = concat_input(AveragePooling2D((2, 2))(inp0), 'd1')
+    inp2 = concat_input(AveragePooling2D((2, 2))(inp1), 'd2')
+
+    # Build outputs in resnet fashion
+    out2 = unet_block([32, 64], inp2)
+
+    out1 = UpSampling2D((2, 2))(out2)
+    out1 = radd(out1, inp1, lambda x: unet_block([32, 48], x))
+    out1 = radd(out1, inp1, lambda x: unet_block([32, 48, 64], x))
+
+    out0 = UpSampling2D((2, 2))(out1)
+    out0 = radd(out0, inp0, lambda x: unet_block([32, 48], x))
+    out0 = radd(out0, inp0, lambda x: unet_block([32, 48, 64], x))
+    out0 = radd(out0, inp0, lambda x: unet_block([32, 64, 96], x))
+    out0 = radd(out0, inp0, lambda x: unet_block([32, 64, 96], x))
+
+    # Final convolution
+    out = Convolution2D(n_classes, 1, 1, activation='sigmoid')(out0)
+
+    return Model(input=inputs.values(), output=out)
+
+
+def dnet6(input_shapes, n_classes, block_size=32, dropout=0.1):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def dense_block(n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(block_size, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(x):
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        x = concat(inps)
+        x = Convolution2D(32, 1, 1, init='he_normal')(x)
+        x = BatchNormalization(axis=1, mode=0)(x)
+        x = PReLU(shared_axes=[2, 3])(x)
+
+        return x
+
+    def concat_input(x, prefix):
+        inp = get_input(prefix)
+
+        if inp is None:
+            return x
+
+        return concat([x, inp])
+
+    # Downpath
+    c1 = dense_block(1, get_input('d0'), append=True)
+    d1 = down_block(c1)
+
+    c2 = dense_block(2, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(c2)
+
+    c3 = dense_block(3, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(c3)
+
+    c4 = dense_block(4, concat_input(d3, 'd3'), append=True)
+    d4 = down_block(c4)
+
+    # Bottleneck
+    c5 = dense_block(4, d4, append=True)
+
+    # Uppath
+    u4 = dense_block(6, concat([c4, up_block(c5)]))
+    u3 = dense_block(4, concat([c3, up_block(u4)]))
+    u2 = dense_block(3, concat([c2, up_block(u3)]))
+    u1 = dense_block(2, concat([c1, up_block(u2)]))
+
+    out = Activation('sigmoid')(Convolution2D(n_classes, 1, 1, init='he_normal')(u1))
+
+    return Model(input=inputs.values(), output=out)
+
+
+def dnet7(input_shapes, n_classes, block_size=16, dropout=0.1):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        return concat(inps)
+
+    def concat_input(x, prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return x
+
+        return concat([x] + inps)
+
+    def dense_block(n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(block_size, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = PReLU(shared_axes=[2, 3])(x)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(x):
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    # Downpath
+    c1 = dense_block(3, get_input('d0'), append=True)
+    d1 = down_block(c1)
+
+    c2 = dense_block(4, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(c2)
+
+    c3 = dense_block(5, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(c3)
+
+    # Bottleneck
+    c4 = dense_block(6, d3, append=True)
+
+    # Uppath
+    u3 = dense_block(6, concat([c3, up_block(c4)]))
+    u2 = dense_block(4, concat([c2, up_block(u3)]))
+    u1 = dense_block(2, concat([c1, up_block(u2)]))
+
+    out = Activation('sigmoid')(Convolution2D(n_classes, 1, 1, init='he_normal')(u1))
+
+    return Model(input=inputs.values(), output=out)
+
+
+def dnet8(input_shapes, n_classes, block_size=24, dropout=0.1):
+    inputs = dict([(name, Input(shape, name=name)) for name, shape in input_shapes.items()])
+
+    def concat(xs):
+        if len(xs) == 1:
+            return xs[0]
+
+        return merge(xs, mode='concat', concat_axis=1)
+
+    def get_input(prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return None
+
+        return concat(inps)
+
+    def concat_input(x, prefix):
+        inps = [inp for name, inp in inputs.items() if name.startswith(prefix + '_')]
+
+        if len(inps) == 0:
+            return x
+
+        return concat([x] + inps)
+
+    def dense_block(n, inp, append=False):
+        outputs = [inp] if append else []
+
+        for i in xrange(n):
+            x = Convolution2D(block_size, 3, 3, border_mode='same', init='he_normal')(inp)
+            x = ELU()(x)
+            x = BatchNormalization(axis=1, mode=0)(x)
+            x = Dropout(dropout)(x)
+
+            outputs.append(x)
+            inp = concat([inp, x])
+
+        return concat(outputs)
+
+    def down_block(x):
+        return MaxPooling2D((2, 2))(x)
+
+    def up_block(x):
+        return UpSampling2D(size=(2, 2))(x)
+
+    # Downpath
+    c1 = dense_block(3, get_input('d0'), append=True)
+    d1 = down_block(c1)
+
+    c2 = dense_block(4, concat_input(d1, 'd1'), append=True)
+    d2 = down_block(c2)
+
+    c3 = dense_block(5, concat_input(d2, 'd2'), append=True)
+    d3 = down_block(c3)
+
+    c4 = dense_block(5, concat_input(d3, 'd3'), append=True)
+    d4 = down_block(c4)
+
+    # Bottleneck
+    c5 = dense_block(6, d4, append=True)
+
+    # Uppath
+    u4 = dense_block(8, concat([c4, up_block(c5)]))
+    u3 = dense_block(6, concat([c3, up_block(u4)]))
+    u2 = dense_block(4, concat([c2, up_block(u3)]))
+    u1 = dense_block(2, concat([c1, up_block(u2)]))
+
+    out = Convolution2D(n_classes, 1, 1, init='he_normal', activation='sigmoid')(u1)
 
     return Model(input=inputs.values(), output=out)

@@ -279,7 +279,7 @@ class ModelPipeline(object):
     def load_weights(self, name):
         self.model.load_weights('cache/models/%s.hdf5' % name)
 
-    def fit(self, train_image_ids, val_image_ids=None, n_epoch=100, epoch_batches='grid', batch_size=64, augment={}, optimizer=None, loss_jac_weight=0.1, batch_class_threshold=0, class_weights=1.0, ema=True, batch_noclass_accept_proba=0, batch_noclass_accept_proba_growth=0):
+    def fit(self, train_image_ids, val_image_ids=None, n_epoch=100, epoch_batches='grid', batch_size=64, augment={}, optimizer=None, loss_jac_weight=0.1, batch_class_threshold=0, class_weights=1.0, ema=False, batch_noclass_accept_proba=0, batch_noclass_accept_proba_growth=0):
         print "Fitting normalizers..."
 
         augmenter = Augmenter(**augment)
@@ -371,7 +371,7 @@ class ModelPipeline(object):
 
             xbs[input_name] = xb
 
-        pb = self.model.predict(xbs, batch_size=128)
+        pb = self.model.predict(xbs, batch_size=32)
 
         if debug:
             self.write_batch_images(xbs, pb, [(0, i / (self.n_patches - 1.0), j / (self.n_patches - 1.0)) for i in xrange(self.n_patches) for j in xrange(self.n_patches)], [image_id], 'pred')
